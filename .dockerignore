@@ -1,0 +1,52 @@
+# Git
+.git
+.gitignore
+
+# Documentation
+README.md
+*.md
+
+# Build artifacts
+bin/
+dist/
+build/
+tmp/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Test files
+*_test.go
+coverage.out
+coverage.html
+
+# Docker
+Dockerfile*
+docker-compose*
+.dockerignore
+
+# CI/CD
+.github/
+
+# Environment
+.env*
+
+# Temporary files
+tmp/
+temp/
+
+# Generated files (will be generated in Docker)
+docs/docs.go
+docs/swagger.json
+docs/swagger.yaml
