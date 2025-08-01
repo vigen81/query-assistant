@@ -24,11 +24,21 @@ func NewSchemaRepository(client *clickhouse.Client, logger *logrus.Logger) *Sche
 
 // GetDatabaseSchema retrieves the complete database schema
 func (r *SchemaRepository) GetDatabaseSchema(ctx context.Context) (*models.SchemaInfo, error) {
-	// Get current database name
-	var database string
-	err := r.client.QueryRow(ctx, "SELECT currentDatabase()").Scan(&database)
+	// Get current database name - use the native connection instead of SQL
+	conn := r.client.GetConn()
+
+	// Execute query using native connection
+	rows, err := conn.Query(ctx, "SELECT currentDatabase()")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get current database: %w", err)
+	}
+	defer rows.Close()
+
+	var database string
+	if rows.Next() {
+		if err := rows.Scan(&database); err != nil {
+			return nil, fmt.Errorf("failed to scan database name: %w", err)
+		}
 	}
 
 	// Get all tables
@@ -73,7 +83,9 @@ func (r *SchemaRepository) getTables(ctx context.Context, database string) ([]mo
 		ORDER BY name
 	`
 
-	rows, err := r.client.Query(ctx, query, database)
+	// Use native connection
+	conn := r.client.GetConn()
+	rows, err := conn.Query(ctx, query, database)
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +107,7 @@ func (r *SchemaRepository) getTables(ctx context.Context, database string) ([]mo
 		tables = append(tables, table)
 	}
 
-	return tables, rows.Err()
+	return tables, nil
 }
 
 // getTableColumns retrieves columns for a specific table
@@ -113,7 +125,9 @@ func (r *SchemaRepository) getTableColumns(ctx context.Context, database, table 
 		ORDER BY position
 	`
 
-	rows, err := r.client.Query(ctx, query, database, table)
+	// Use native connection
+	conn := r.client.GetConn()
+	rows, err := conn.Query(ctx, query, database, table)
 	if err != nil {
 		return nil, err
 	}
@@ -165,7 +179,7 @@ func (r *SchemaRepository) getTableColumns(ctx context.Context, database, table 
 		columns = append(columns, col)
 	}
 
-	return columns, rows.Err()
+	return columns, nil
 }
 
 // getTableRowCount gets an approximate row count for a table
@@ -176,10 +190,19 @@ func (r *SchemaRepository) getTableRowCount(ctx context.Context, database, table
 		WHERE database = ? AND table = ? AND active
 	`
 
-	var count sql.NullInt64
-	err := r.client.QueryRow(ctx, query, database, table).Scan(&count)
+	// Use native connection
+	conn := r.client.GetConn()
+	rows, err := conn.Query(ctx, query, database, table)
 	if err != nil {
 		return 0, err
+	}
+	defer rows.Close()
+
+	var count sql.NullInt64
+	if rows.Next() {
+		if err := rows.Scan(&count); err != nil {
+			return 0, err
+		}
 	}
 
 	if count.Valid {
@@ -191,11 +214,19 @@ func (r *SchemaRepository) getTableRowCount(ctx context.Context, database, table
 
 // GetTableSchema retrieves schema for a specific table
 func (r *SchemaRepository) GetTableSchema(ctx context.Context, tableName string) (*models.TableSchema, error) {
-	// Get current database
-	var database string
-	err := r.client.QueryRow(ctx, "SELECT currentDatabase()").Scan(&database)
+	// Get current database using native connection
+	conn := r.client.GetConn()
+	rows, err := conn.Query(ctx, "SELECT currentDatabase()")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get current database: %w", err)
+	}
+	defer rows.Close()
+
+	var database string
+	if rows.Next() {
+		if err := rows.Scan(&database); err != nil {
+			return nil, fmt.Errorf("failed to scan database name: %w", err)
+		}
 	}
 
 	// Get table info
@@ -211,11 +242,17 @@ func (r *SchemaRepository) GetTableSchema(ctx context.Context, tableName string)
 	var table models.TableSchema
 	var comment sql.NullString
 
-	err = r.client.QueryRow(ctx, query, database, tableName).Scan(&table.Name, &table.Engine, &comment)
+	rows2, err := conn.Query(ctx, query, database, tableName)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("table %s not found", tableName)
-		}
+		return nil, err
+	}
+	defer rows2.Close()
+
+	if !rows2.Next() {
+		return nil, fmt.Errorf("table %s not found", tableName)
+	}
+
+	if err := rows2.Scan(&table.Name, &table.Engine, &comment); err != nil {
 		return nil, err
 	}
 

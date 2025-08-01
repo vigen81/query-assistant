@@ -7,12 +7,13 @@ import (
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
+	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/sirupsen/logrus"
 	"gitlab.smartbet.am/golang/query-assistant/internal/config"
 )
 
 type Client struct {
-	conn   clickhouse.Conn
+	conn   driver.Conn
 	db     *sql.DB
 	config *config.Config
 	logger *logrus.Logger
@@ -30,6 +31,9 @@ func NewClient(cfg *config.Config, logger *logrus.Logger) (*Client, error) {
 		DialTimeout: 5 * time.Second,
 		Compression: &clickhouse.Compression{
 			Method: clickhouse.CompressionLZ4,
+		},
+		Settings: clickhouse.Settings{
+			"max_execution_time": 60,
 		},
 		MaxOpenConns:    cfg.ClickHouse.MaxOpenConns,
 		MaxIdleConns:    cfg.ClickHouse.MaxIdleConns,
@@ -50,11 +54,29 @@ func NewClient(cfg *config.Config, logger *logrus.Logger) (*Client, error) {
 		return nil, fmt.Errorf("failed to ping clickhouse: %w", err)
 	}
 
-	// Also create standard SQL DB for queries
+	// Create standard SQL DB for queries
 	db := clickhouse.OpenDB(options)
-	db.SetMaxOpenConns(cfg.ClickHouse.MaxOpenConns)
-	db.SetMaxIdleConns(cfg.ClickHouse.MaxIdleConns)
-	db.SetConnMaxLifetime(time.Duration(cfg.ClickHouse.ConnMaxLifetime) * time.Second)
+
+	// Set connection pool parameters (with defaults if not specified)
+	maxOpenConns := cfg.ClickHouse.MaxOpenConns
+	if maxOpenConns <= 0 {
+		maxOpenConns = 10
+	}
+	maxIdleConns := cfg.ClickHouse.MaxIdleConns
+	if maxIdleConns <= 0 {
+		maxIdleConns = 5
+	}
+	connMaxLifetime := cfg.ClickHouse.ConnMaxLifetime
+	if connMaxLifetime <= 0 {
+		connMaxLifetime = 300
+	}
+
+	db.SetMaxOpenConns(maxOpenConns)
+	db.SetMaxIdleConns(maxIdleConns)
+	db.SetConnMaxLifetime(time.Duration(connMaxLifetime) * time.Second)
+
+	// Don't test SQL connection during initialization - it seems to cause issues
+	// The connection will be tested when first used
 
 	logger.Info("ClickHouse connection established")
 
@@ -96,7 +118,7 @@ func (c *Client) QueryRow(ctx context.Context, query string, args ...interface{}
 }
 
 // GetConn returns the native ClickHouse connection
-func (c *Client) GetConn() clickhouse.Conn {
+func (c *Client) GetConn() driver.Conn {
 	return c.conn
 }
 

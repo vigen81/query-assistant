@@ -31,8 +31,8 @@ const mockConfig = `{
 		"query_timeout": "60s"
 	},
 	"openai": {
-		"api_key": "your-openai-api-key",
-		"model": "gpt-4-turbo-preview",
+		"api_key": "",
+		"model": "gpt-3.5-turbo",
 		"max_tokens": 2000,
 		"temperature": 0.1,
 		"timeout": "30s"

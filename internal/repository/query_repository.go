@@ -2,7 +2,6 @@ package repository
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"time"
 
@@ -26,41 +25,32 @@ func NewQueryRepository(client *clickhouse.Client, logger *logrus.Logger) *Query
 func (r *QueryRepository) ExecuteQuery(ctx context.Context, query string) ([]map[string]interface{}, int, time.Duration, error) {
 	startTime := time.Now()
 
+	// Use native connection instead of SQL DB
+	conn := r.client.GetConn()
+
 	// Execute query
-	rows, err := r.client.Query(ctx, query)
+	rows, err := conn.Query(ctx, query)
 	if err != nil {
 		return nil, 0, time.Since(startTime), fmt.Errorf("query execution failed: %w", err)
 	}
 	defer rows.Close()
 
 	// Get column names
-	columns, err := rows.Columns()
-	if err != nil {
-		return nil, 0, time.Since(startTime), fmt.Errorf("failed to get columns: %w", err)
-	}
+	columns := rows.Columns()
 
 	// Get column types
-	columnTypes, err := rows.ColumnTypes()
-	if err != nil {
-		return nil, 0, time.Since(startTime), fmt.Errorf("failed to get column types: %w", err)
-	}
+	columnTypes := rows.ColumnTypes()
 
 	// Prepare result slice
 	var results []map[string]interface{}
 	rowCount := 0
 
-	// Create a slice of interface{} to hold column values
-	values := make([]interface{}, len(columns))
-	valuePtrs := make([]interface{}, len(columns))
-
 	// Scan rows
 	for rows.Next() {
-		// Reset values for each row
-		for i := range columns {
-			valuePtrs[i] = &values[i]
-		}
+		// Create a slice of interface{} to hold column values
+		values := make([]interface{}, len(columns))
 
-		if err := rows.Scan(valuePtrs...); err != nil {
+		if err := rows.Scan(values...); err != nil {
 			return nil, rowCount, time.Since(startTime), fmt.Errorf("failed to scan row: %w", err)
 		}
 
@@ -90,7 +80,7 @@ func (r *QueryRepository) ExecuteQuery(ctx context.Context, query string) ([]map
 }
 
 // convertValue converts database values to appropriate Go types
-func (r *QueryRepository) convertValue(value interface{}, columnType *sql.ColumnType) interface{} {
+func (r *QueryRepository) convertValue(value interface{}, columnType interface{}) interface{} {
 	if value == nil {
 		return nil
 	}
@@ -116,7 +106,8 @@ func (r *QueryRepository) ValidateQuery(ctx context.Context, query string) error
 	// Use EXPLAIN to validate the query syntax
 	explainQuery := fmt.Sprintf("EXPLAIN SYNTAX %s", query)
 
-	rows, err := r.client.Query(ctx, explainQuery)
+	conn := r.client.GetConn()
+	rows, err := conn.Query(ctx, explainQuery)
 	if err != nil {
 		return fmt.Errorf("query validation failed: %w", err)
 	}
@@ -137,7 +128,8 @@ func (r *QueryRepository) ValidateQuery(ctx context.Context, query string) error
 func (r *QueryRepository) GetQueryPlan(ctx context.Context, query string) (string, error) {
 	explainQuery := fmt.Sprintf("EXPLAIN %s", query)
 
-	rows, err := r.client.Query(ctx, explainQuery)
+	conn := r.client.GetConn()
+	rows, err := conn.Query(ctx, explainQuery)
 	if err != nil {
 		return "", fmt.Errorf("failed to get query plan: %w", err)
 	}
