@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.24-alpine AS build
+FROM 499144353299.dkr.ecr.eu-central-1.amazonaws.com/docker-hub/library/golang:1.24-alpine AS build
 
 # Install dependencies
 RUN apk add --no-cache git ca-certificates tzdata
