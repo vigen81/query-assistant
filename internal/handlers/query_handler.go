@@ -6,7 +6,6 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/sirupsen/logrus"
-	"gitlab.smartbet.am/golang/query-assistant/internal/logger"
 	"gitlab.smartbet.am/golang/query-assistant/internal/models"
 	"gitlab.smartbet.am/golang/query-assistant/internal/services"
 )
@@ -32,10 +31,8 @@ func NewQueryHandler(queryService *services.QueryService, logger *logrus.Logger)
 // @Param query body models.QueryRequest true "Query request"
 // @Success 200 {object} models.QueryResponse
 // @Failure 400 {object} models.ErrorResponse
-// @Failure 401 {object} models.ErrorResponse
 // @Failure 408 {object} models.ErrorResponse
 // @Failure 500 {object} models.ErrorResponse
-// @Security BearerAuth
 // @Router /query/execute [post]
 func (h *QueryHandler) ExecuteQuery(c *fiber.Ctx) error {
 	var req models.QueryRequest
@@ -56,23 +53,12 @@ func (h *QueryHandler) ExecuteQuery(c *fiber.Ctx) error {
 		})
 	}
 
-	// Get user ID from context (set by auth middleware)
-	userID := ""
-	if uid := c.Locals("user_id"); uid != nil {
-		userID = uid.(string)
-	}
-
-	log := logger.WithUser(userID)
-	log.Info("Processing query request", map[string]interface{}{
-		"prompt": req.Prompt,
-	})
+	h.logger.WithField("prompt", req.Prompt).Info("Processing query request")
 
 	// Process the query
 	response, err := h.queryService.ProcessQuery(c.Context(), &req)
 	if err != nil {
-		log.Error("Query processing failed", err, map[string]interface{}{
-			"prompt": req.Prompt,
-		})
+		h.logger.WithError(err).WithField("prompt", req.Prompt).Error("Query processing failed")
 
 		// Determine appropriate error code
 		code := "QUERY_ERROR"
@@ -108,9 +94,7 @@ func (h *QueryHandler) ExecuteQuery(c *fiber.Ctx) error {
 // @Param query body map[string]string true "Query to validate" example({"query": "SELECT * FROM users LIMIT 10"})
 // @Success 200 {object} models.QueryValidationResult
 // @Failure 400 {object} models.ErrorResponse
-// @Failure 401 {object} models.ErrorResponse
 // @Failure 500 {object} models.ErrorResponse
-// @Security BearerAuth
 // @Router /query/validate [post]
 func (h *QueryHandler) ValidateQuery(c *fiber.Ctx) error {
 	var req struct {
@@ -156,9 +140,7 @@ func (h *QueryHandler) ValidateQuery(c *fiber.Ctx) error {
 // @Param request body map[string]string true "Generation request" example({"prompt": "Show me top 10 users by purchase amount"})
 // @Success 200 {object} map[string]string
 // @Failure 400 {object} models.ErrorResponse
-// @Failure 401 {object} models.ErrorResponse
 // @Failure 500 {object} models.ErrorResponse
-// @Security BearerAuth
 // @Router /query/generate [post]
 func (h *QueryHandler) GenerateQuery(c *fiber.Ctx) error {
 	var req struct {

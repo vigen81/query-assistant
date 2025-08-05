@@ -1,0 +1,40 @@
+variables:
+  HELM_PATH: helm/base/apps/query-assistant-service/api
+
+stages:
+  - build
+  - migration
+  - deploy
+
+include:
+  - project: 'devops/templates'
+    ref: 'ec2'
+    file:
+      - 'arm-build-ci.yml'
+      - 'arm-migration-ci.yml'
+      - 'arm-deploy-ci.yml'
+
+build:
+  stage: build
+  rules:
+    - if: '$CI_COMMIT_BRANCH  == "dev"'
+      variables:
+        DOCKER_REPOSITORY: "query-assistant-service-dev"
+      when: always
+    - if: '$CI_COMMIT_BRANCH  == "main"'
+      variables:
+        DOCKER_REPOSITORY: "query-assistant-service"
+      when: always
+    - when: never
+
+dev:deploy:
+  stage: deploy
+  only:
+    - dev
+
+
+prod:deploy:
+  stage: deploy
+  when: manual
+  only:
+    - main

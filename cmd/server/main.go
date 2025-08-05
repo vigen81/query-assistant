@@ -1,4 +1,3 @@
-// File: cmd/server/main.go
 package main
 
 import (
@@ -28,7 +27,7 @@ import (
 // @description - **Natural Language Processing**: Convert plain English prompts to ClickHouse SQL queries
 // @description - **Schema-Aware**: Understands your database schema for accurate query generation
 // @description - **Query Execution**: Automatically executes generated queries with timeout protection
-// @description - **Secure**: JWT authentication and query validation
+// @description - **Secure**: Query validation and execution limits
 // @description - **Observable**: Structured logging with Graylog integration
 // @description
 // @description ## How it works
@@ -42,11 +41,6 @@ import (
 
 // @host localhost:8080
 // @BasePath /api/v1
-
-// @securityDefinitions.apikey BearerAuth
-// @in header
-// @name Authorization
-// @description Type "Bearer" followed by a space and JWT token.
 
 // @tag.name query
 // @tag.description Query generation and execution operations

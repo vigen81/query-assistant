@@ -1,0 +1,402 @@
+basePath: /api/v1
+definitions:
+  models.ColumnSchema:
+    properties:
+      description:
+        example: Unique user identifier
+        type: string
+      is_nullable:
+        example: false
+        type: boolean
+      name:
+        example: user_id
+        type: string
+      type:
+        example: UInt64
+        type: string
+    type: object
+  models.ErrorResponse:
+    properties:
+      code:
+        example: VALIDATION_ERROR
+        type: string
+      details:
+        type: object
+      error:
+        example: Query validation failed
+        type: string
+      message:
+        example: 'Query contains forbidden operation: DROP'
+        type: string
+      query_id:
+        example: 550e8400-e29b-41d4-a716-446655440000
+        type: string
+      timestamp:
+        example: "2023-01-01T00:00:00Z"
+        type: string
+    type: object
+  models.HealthCheckDetail:
+    properties:
+      clickhouse:
+        example: ok
+        type: string
+      openai:
+        example: ok
+        type: string
+    type: object
+  models.HealthResponse:
+    properties:
+      checks:
+        $ref: '#/definitions/models.HealthCheckDetail'
+      service:
+        example: query-assistant
+        type: string
+      status:
+        example: ok
+        type: string
+      timestamp:
+        example: "2023-01-01T00:00:00Z"
+        type: string
+      version:
+        example: 1.0.0
+        type: string
+    type: object
+  models.QueryRequest:
+    properties:
+      context:
+        type: object
+      prompt:
+        example: Show me the top 10 users by total purchase amount in the last 30
+          days
+        type: string
+      timeout:
+        example: 30
+        maximum: 300
+        minimum: 1
+        type: integer
+    type: object
+  models.QueryResponse:
+    properties:
+      execution_time:
+        example: 0.234
+        type: number
+      generated_sql:
+        example: SELECT user_id, SUM(amount) as total FROM purchases WHERE date >=
+          today() - 30 GROUP BY user_id ORDER BY total DESC LIMIT 10
+        type: string
+      prompt:
+        example: Show me the top 10 users by total purchase amount
+        type: string
+      query_id:
+        example: 550e8400-e29b-41d4-a716-446655440000
+        type: string
+      results:
+        items:
+          type: object
+        type: array
+      row_count:
+        example: 10
+        type: integer
+      timestamp:
+        example: "2023-01-01T00:00:00Z"
+        type: string
+    type: object
+  models.QueryValidationResult:
+    properties:
+      columns:
+        items:
+          type: string
+        type: array
+      errors:
+        items:
+          type: string
+        type: array
+      operations:
+        items:
+          type: string
+        type: array
+      tables:
+        items:
+          type: string
+        type: array
+      valid:
+        type: boolean
+      warnings:
+        items:
+          type: string
+        type: array
+    type: object
+  models.SchemaInfo:
+    properties:
+      database:
+        example: analytics
+        type: string
+      tables:
+        items:
+          $ref: '#/definitions/models.TableSchema'
+        type: array
+    type: object
+  models.TableSchema:
+    properties:
+      columns:
+        items:
+          $ref: '#/definitions/models.ColumnSchema'
+        type: array
+      description:
+        example: User information table
+        type: string
+      engine:
+        example: MergeTree
+        type: string
+      name:
+        example: users
+        type: string
+      row_count:
+        example: 1000000
+        type: integer
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  description: |-
+    An intelligent query assistant that uses ChatGPT to generate and execute ClickHouse queries based on natural language prompts.
+
+    ## Features
+    - **Natural Language Processing**: Convert plain English prompts to ClickHouse SQL queries
+    - **Schema-Aware**: Understands your database schema for accurate query generation
+    - **Query Execution**: Automatically executes generated queries with timeout protection
+    - **Secure**: Query validation and execution limits
+    - **Observable**: Structured logging with Graylog integration
+
+    ## How it works
+    1. User submits a natural language prompt about their data
+    2. System sends the prompt along with schema information to ChatGPT
+    3. ChatGPT generates an appropriate ClickHouse query
+    4. System validates and executes the query with timeout protection
+    5. Results are formatted and returned to the user
+  termsOfService: http://swagger.io/terms/
+  title: Query Assistant API
+  version: "1.0"
+paths:
+  /health:
+    get:
+      description: Returns the general health status of the query assistant service
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Service is healthy
+          schema:
+            $ref: '#/definitions/models.HealthResponse'
+      summary: Health check
+      tags:
+      - health
+  /live:
+    get:
+      description: Returns the liveness status of the query assistant
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Service is alive
+          schema:
+            $ref: '#/definitions/models.HealthResponse'
+      summary: Liveness check
+      tags:
+      - health
+  /query/execute:
+    post:
+      consumes:
+      - application/json
+      description: Convert a natural language prompt to SQL and execute it against
+        ClickHouse
+      parameters:
+      - description: Query request
+        in: body
+        name: query
+        required: true
+        schema:
+          $ref: '#/definitions/models.QueryRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.QueryResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "408":
+          description: Request Timeout
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      summary: Execute a natural language query
+      tags:
+      - query
+  /query/generate:
+    post:
+      consumes:
+      - application/json
+      description: Generate a SQL query from natural language prompt without executing
+        it
+      parameters:
+      - description: Generation request
+        in: body
+        name: request
+        required: true
+        schema:
+          additionalProperties:
+            type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      summary: Generate SQL query
+      tags:
+      - query
+  /query/validate:
+    post:
+      consumes:
+      - application/json
+      description: Validate a SQL query for syntax and security without executing
+        it
+      parameters:
+      - description: Query to validate
+        in: body
+        name: query
+        required: true
+        schema:
+          additionalProperties:
+            type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.QueryValidationResult'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      summary: Validate a SQL query
+      tags:
+      - query
+  /ready:
+    get:
+      description: Returns the readiness status of the query assistant including dependency
+        checks
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Service is ready to accept requests
+          schema:
+            $ref: '#/definitions/models.HealthResponse'
+        "503":
+          description: Service is not ready - dependencies not available
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      summary: Readiness check
+      tags:
+      - health
+  /schema:
+    get:
+      description: Get the complete database schema including all tables and columns
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.SchemaInfo'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      summary: Get database schema
+      tags:
+      - schema
+  /schema/refresh:
+    post:
+      description: Manually refresh the database schema cache
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      summary: Refresh schema cache
+      tags:
+      - schema
+  /schema/table/{table}:
+    get:
+      description: Get schema information for a specific table
+      parameters:
+      - description: Table name
+        in: path
+        name: table
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.TableSchema'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      summary: Get table schema
+      tags:
+      - schema
+swagger: "2.0"
+tags:
+- description: Query generation and execution operations
+  name: query
+- description: Database schema information
+  name: schema
+- description: Health and readiness checks
+  name: health

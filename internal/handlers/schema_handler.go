@@ -27,9 +27,7 @@ func NewSchemaHandler(schemaRepo *repository.SchemaRepository, logger *logrus.Lo
 // @Tags schema
 // @Produce json
 // @Success 200 {object} models.SchemaInfo
-// @Failure 401 {object} models.ErrorResponse
 // @Failure 500 {object} models.ErrorResponse
-// @Security BearerAuth
 // @Router /schema [get]
 func (h *SchemaHandler) GetDatabaseSchema(c *fiber.Ctx) error {
 	schema, err := h.schemaRepo.GetDatabaseSchema(c.Context())
@@ -53,10 +51,8 @@ func (h *SchemaHandler) GetDatabaseSchema(c *fiber.Ctx) error {
 // @Param table path string true "Table name"
 // @Success 200 {object} models.TableSchema
 // @Failure 400 {object} models.ErrorResponse
-// @Failure 401 {object} models.ErrorResponse
 // @Failure 404 {object} models.ErrorResponse
 // @Failure 500 {object} models.ErrorResponse
-// @Security BearerAuth
 // @Router /schema/table/{table} [get]
 func (h *SchemaHandler) GetTableSchema(c *fiber.Ctx) error {
 	tableName := c.Params("table")
@@ -96,9 +92,7 @@ func (h *SchemaHandler) GetTableSchema(c *fiber.Ctx) error {
 // @Tags schema
 // @Produce json
 // @Success 200 {object} map[string]string
-// @Failure 401 {object} models.ErrorResponse
 // @Failure 500 {object} models.ErrorResponse
-// @Security BearerAuth
 // @Router /schema/refresh [post]
 func (h *SchemaHandler) RefreshSchema(c *fiber.Ctx) error {
 	// This would trigger a schema cache refresh if you implement caching
