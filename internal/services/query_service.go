@@ -3,12 +3,12 @@ package services
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
-	"gitlab.smartbet.am/golang/query-assistant/internal/logger"
 	"gitlab.smartbet.am/golang/query-assistant/internal/models"
 	"gitlab.smartbet.am/golang/query-assistant/internal/openai"
 	"gitlab.smartbet.am/golang/query-assistant/internal/repository"
@@ -38,43 +38,47 @@ func NewQueryService(
 // ProcessQuery processes a natural language query request
 func (s *QueryService) ProcessQuery(ctx context.Context, req *models.QueryRequest) (*models.QueryResponse, error) {
 	queryID := uuid.New().String()
-	log := logger.WithQuery(queryID)
 
-	log.Info("Processing query request", map[string]interface{}{
-		"prompt": req.Prompt,
-	})
+	s.logger.WithFields(logrus.Fields{
+		"query_id": queryID,
+		"prompt":   req.Prompt,
+	}).Info("Processing query request")
 
 	// Get database schema
 	schemaInfo, err := s.schemaRepo.GetDatabaseSchema(ctx)
 	if err != nil {
-		log.Error("Failed to get database schema", err, map[string]interface{}{})
+		s.logger.WithError(err).Error("Failed to get database schema")
 		return nil, fmt.Errorf("failed to get database schema: %w", err)
 	}
 
 	// Generate SQL query using OpenAI
 	generatedSQL, err := s.openaiClient.GenerateQuery(ctx, req.Prompt, schemaInfo)
 	if err != nil {
-		log.Error("Failed to generate SQL query", err, map[string]interface{}{})
+		s.logger.WithError(err).Error("Failed to generate SQL query")
 		return nil, fmt.Errorf("failed to generate SQL query: %w", err)
 	}
 
-	log.Info("SQL query generated", map[string]interface{}{
+	// Clean up the generated SQL (remove markdown, extra text, etc.)
+	generatedSQL = s.cleanGeneratedSQL(generatedSQL)
+
+	s.logger.WithFields(logrus.Fields{
+		"query_id":      queryID,
 		"generated_sql": generatedSQL,
-	})
+	}).Info("SQL query generated")
 
 	// Validate the generated query
 	if err := s.validateQuery(generatedSQL); err != nil {
-		log.Error("Query validation failed", err, map[string]interface{}{
+		s.logger.WithFields(logrus.Fields{
+			"query_id":      queryID,
 			"generated_sql": generatedSQL,
-		})
+			"error":         err.Error(),
+		}).Error("Query validation failed")
 		return nil, fmt.Errorf("query validation failed: %w", err)
 	}
 
 	// Validate query syntax with ClickHouse
 	if err := s.queryRepo.ValidateQuery(ctx, generatedSQL); err != nil {
-		log.Error("ClickHouse query validation failed", err, map[string]interface{}{
-			"generated_sql": generatedSQL,
-		})
+		s.logger.WithError(err).Error("ClickHouse query validation failed")
 		return nil, fmt.Errorf("ClickHouse query validation failed: %w", err)
 	}
 
@@ -90,16 +94,15 @@ func (s *QueryService) ProcessQuery(ctx context.Context, req *models.QueryReques
 	// Execute the query
 	results, rowCount, executionTime, err := s.queryRepo.ExecuteQuery(queryCtx, generatedSQL)
 	if err != nil {
-		log.Error("Query execution failed", err, map[string]interface{}{
-			"generated_sql": generatedSQL,
-		})
+		s.logger.WithError(err).Error("Query execution failed")
 		return nil, fmt.Errorf("query execution failed: %w", err)
 	}
 
-	log.Info("Query executed successfully", map[string]interface{}{
+	s.logger.WithFields(logrus.Fields{
+		"query_id":       queryID,
 		"row_count":      rowCount,
 		"execution_time": executionTime,
-	})
+	}).Info("Query executed successfully")
 
 	response := &models.QueryResponse{
 		QueryID:       queryID,
@@ -114,32 +117,92 @@ func (s *QueryService) ProcessQuery(ctx context.Context, req *models.QueryReques
 	return response, nil
 }
 
+// cleanGeneratedSQL removes markdown formatting and extra text from generated SQL
+func (s *QueryService) cleanGeneratedSQL(sql string) string {
+	// Remove markdown code blocks
+	sql = regexp.MustCompile("```sql\n?").ReplaceAllString(sql, "")
+	sql = regexp.MustCompile("```\n?").ReplaceAllString(sql, "")
+
+	// Remove any lines that start with explanation text
+	lines := strings.Split(sql, "\n")
+	var sqlLines []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		// Skip empty lines or lines that look like explanations
+		if trimmed == "" || strings.HasPrefix(trimmed, "--") || strings.HasPrefix(trimmed, "//") {
+			continue
+		}
+		// Stop if we hit explanation text after the query
+		if strings.Contains(strings.ToLower(trimmed), "this query") ||
+			strings.Contains(strings.ToLower(trimmed), "the above") ||
+			strings.Contains(strings.ToLower(trimmed), "explanation:") {
+			break
+		}
+		sqlLines = append(sqlLines, line)
+	}
+
+	sql = strings.Join(sqlLines, "\n")
+	sql = strings.TrimSpace(sql)
+
+	// Ensure it ends with semicolon
+	if !strings.HasSuffix(sql, ";") {
+		sql += ";"
+	}
+
+	return sql
+}
+
 // validateQuery performs security validation on the generated query
 func (s *QueryService) validateQuery(query string) error {
 	upperQuery := strings.ToUpper(query)
 
-	// Check for forbidden keywords
-	forbiddenKeywords := []string{
-		"DROP", "DELETE", "TRUNCATE", "ALTER", "CREATE",
-		"INSERT", "UPDATE", "GRANT", "REVOKE", "ATTACH",
-		"DETACH", "RENAME", "REPLACE", "OPTIMIZE",
-	}
+	// Remove comments for validation
+	cleanQuery := regexp.MustCompile(`--.*$`).ReplaceAllString(upperQuery, "")
+	cleanQuery = regexp.MustCompile(`/\*.*?\*/`).ReplaceAllString(cleanQuery, "")
 
-	for _, keyword := range forbiddenKeywords {
-		if strings.Contains(upperQuery, keyword) {
-			return fmt.Errorf("query contains forbidden operation: %s", keyword)
-		}
-	}
-
-	// Ensure it's a SELECT query
-	trimmedQuery := strings.TrimSpace(upperQuery)
+	// Check if it's fundamentally a SELECT query (WITH is allowed for CTEs)
+	trimmedQuery := strings.TrimSpace(cleanQuery)
 	if !strings.HasPrefix(trimmedQuery, "SELECT") && !strings.HasPrefix(trimmedQuery, "WITH") {
 		return fmt.Errorf("only SELECT queries are allowed")
 	}
 
-	// Check for multiple statements
-	if strings.Count(query, ";") > 1 {
+	// List of truly dangerous keywords that should never appear
+	dangerousKeywords := []string{
+		"DROP TABLE", "DROP DATABASE", "DROP VIEW",
+		"DELETE FROM", "TRUNCATE TABLE",
+		"ALTER TABLE", "ALTER DATABASE",
+		"CREATE TABLE", "CREATE DATABASE", "CREATE VIEW",
+		"INSERT INTO", "UPDATE SET",
+		"GRANT", "REVOKE",
+		"ATTACH", "DETACH",
+		"RENAME", "REPLACE",
+		"OPTIMIZE TABLE",
+		"KILL", "SYSTEM",
+	}
+
+	// Check for dangerous keyword combinations (not just individual words)
+	for _, keyword := range dangerousKeywords {
+		if strings.Contains(cleanQuery, keyword) {
+			return fmt.Errorf("query contains forbidden operation: %s", keyword)
+		}
+	}
+
+	// Check for multiple statements (but allow semicolon at the end)
+	queryWithoutTrailingSemi := strings.TrimSuffix(strings.TrimSpace(query), ";")
+	if strings.Count(queryWithoutTrailingSemi, ";") > 0 {
 		return fmt.Errorf("multiple statements are not allowed")
+	}
+
+	// Additional checks for suspicious patterns
+	suspiciousPatterns := []string{
+		"INTO OUTFILE",
+		"INTO DUMPFILE",
+	}
+
+	for _, pattern := range suspiciousPatterns {
+		if strings.Contains(cleanQuery, pattern) {
+			return fmt.Errorf("query contains suspicious pattern: %s", pattern)
+		}
 	}
 
 	return nil

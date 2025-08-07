@@ -3,6 +3,7 @@ package openai
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -19,7 +20,21 @@ type Client struct {
 }
 
 func NewClient(cfg *config.Config, logger *logrus.Logger) *Client {
-	client := openai.NewClient(cfg.OpenAI.APIKey)
+	// Get API key from environment variable first, then fall back to config
+	apiKey := os.Getenv("OPENAI_API_KEY")
+	if apiKey == "" {
+		apiKey = cfg.OpenAI.APIKey
+	}
+
+	// Log API key info (masked for security)
+	if apiKey == "" {
+		logger.Error("OpenAI API key is empty!")
+	} else {
+		maskedKey := apiKey[:8] + "..." + apiKey[len(apiKey)-4:]
+		logger.WithField("api_key", maskedKey).Info("OpenAI client initialized with API key")
+	}
+
+	client := openai.NewClient(apiKey)
 
 	return &Client{
 		client: client,
@@ -40,13 +55,23 @@ func (c *Client) GenerateQuery(ctx context.Context, prompt string, schemaInfo *m
 	// Build the user message
 	userMessage := fmt.Sprintf(`Generate a ClickHouse SQL query for the following request: "%s"
 
-Rules:
-1. Use only SELECT statements
-2. Include appropriate WHERE clauses for efficiency
-3. Use proper ClickHouse functions and syntax
-4. Limit results appropriately (default to 100 rows if not specified)
-5. Return ONLY the SQL query, no explanations or markdown
-6. Ensure the query is optimized for ClickHouse`, prompt)
+IMPORTANT RULES:
+1. Generate ONLY a SELECT statement - never use CREATE, DROP, INSERT, UPDATE, DELETE, or any other DDL/DML operations
+2. Return ONLY the SQL query itself - no markdown formatting, no explanations, no comments
+3. Do not wrap the query in backticks or code blocks
+4. Include appropriate WHERE clauses for efficiency
+5. Use proper ClickHouse functions and syntax
+6. Add LIMIT clause (default to 100 rows if not specified)
+7. The query must be ready to execute as-is
+
+Example format:
+SELECT column1, column2 FROM table WHERE condition LIMIT 100`, prompt)
+
+	// Get model from environment or config
+	model := os.Getenv("OPENAI_MODEL")
+	if model == "" {
+		model = c.config.OpenAI.Model
+	}
 
 	messages := []openai.ChatCompletionMessage{
 		{
@@ -61,13 +86,13 @@ Rules:
 
 	c.logger.WithFields(logrus.Fields{
 		"prompt": prompt,
-		"model":  c.config.OpenAI.Model,
+		"model":  model,
 	}).Debug("Requesting query generation from OpenAI")
 
 	resp, err := c.client.CreateChatCompletion(
 		ctx,
 		openai.ChatCompletionRequest{
-			Model:       c.config.OpenAI.Model,
+			Model:       model,
 			Messages:    messages,
 			MaxTokens:   c.config.OpenAI.MaxTokens,
 			Temperature: c.config.OpenAI.Temperature,
@@ -75,6 +100,11 @@ Rules:
 	)
 
 	if err != nil {
+		// Log more details about the error
+		c.logger.WithFields(logrus.Fields{
+			"error": err.Error(),
+			"model": model,
+		}).Error("OpenAI API request failed")
 		return "", fmt.Errorf("failed to generate query: %w", err)
 	}
 
@@ -138,10 +168,13 @@ func (c *Client) ValidateConnection(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	_, err := c.client.ListModels(ctx)
+	// Test with a simple model list request
+	models, err := c.client.ListModels(ctx)
 	if err != nil {
+		c.logger.WithError(err).Error("OpenAI connection validation failed")
 		return fmt.Errorf("OpenAI connection validation failed: %w", err)
 	}
 
+	c.logger.WithField("model_count", len(models.Models)).Info("OpenAI connection validated successfully")
 	return nil
 }

@@ -47,17 +47,65 @@ func (r *QueryRepository) ExecuteQuery(ctx context.Context, query string) ([]map
 
 	// Scan rows
 	for rows.Next() {
-		// Create a slice of interface{} to hold column values
+		// Create a slice to hold the actual values
 		values := make([]interface{}, len(columns))
+		// Create a slice of pointers to scan into
+		valuePtrs := make([]interface{}, len(columns))
 
-		if err := rows.Scan(values...); err != nil {
+		// Initialize each value based on the column type
+		for i, colType := range columnTypes {
+			switch colType.DatabaseTypeName() {
+			case "String", "FixedString":
+				values[i] = new(string)
+			case "UInt8", "UInt16", "UInt32", "UInt64":
+				values[i] = new(uint64)
+			case "Int8", "Int16", "Int32", "Int64":
+				values[i] = new(int64)
+			case "Float32":
+				values[i] = new(float32)
+			case "Float64":
+				values[i] = new(float64)
+			case "Date", "DateTime", "DateTime64":
+				values[i] = new(time.Time)
+			case "Bool":
+				values[i] = new(bool)
+			default:
+				// For any other type, use interface{}
+				values[i] = new(interface{})
+			}
+			valuePtrs[i] = values[i]
+		}
+
+		if err := rows.Scan(valuePtrs...); err != nil {
 			return nil, rowCount, time.Since(startTime), fmt.Errorf("failed to scan row: %w", err)
 		}
 
 		// Create a map for this row
 		rowMap := make(map[string]interface{})
 		for i, col := range columns {
-			rowMap[col] = r.convertValue(values[i], columnTypes[i])
+			// Dereference the pointer and get the actual value
+			var actualValue interface{}
+			switch v := values[i].(type) {
+			case *string:
+				actualValue = *v
+			case *uint64:
+				actualValue = *v
+			case *int64:
+				actualValue = *v
+			case *float32:
+				actualValue = *v
+			case *float64:
+				actualValue = *v
+			case *time.Time:
+				actualValue = v.Format(time.RFC3339)
+			case *bool:
+				actualValue = *v
+			case *interface{}:
+				actualValue = *v
+			default:
+				actualValue = v
+			}
+			rowMap[col] = actualValue
 		}
 
 		results = append(results, rowMap)
