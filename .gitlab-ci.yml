@@ -27,14 +27,40 @@ build:
       when: always
     - when: never
 
+dev:migration:
+  stage: migration
+  needs:
+    - build
+  rules:
+    - if: '$CI_COMMIT_BRANCH  == "dev"'
+      variables:
+        DOCKER_REPOSITORY: "query-assistant-service-dev"
+      when: always
+    - when: never
+
 dev:deploy:
   stage: deploy
+  needs:
+    - dev:migration
   only:
     - dev
 
+prod:migration:
+  stage: migration
+  when: manual
+  needs:
+    - build
+  rules:
+    - if: '$CI_COMMIT_BRANCH  == "main"'
+      variables:
+        DOCKER_REPOSITORY: "query-assistant-service"
+      when: always
+    - when: never
 
 prod:deploy:
   stage: deploy
   when: manual
+  needs:
+    - prod:migration
   only:
     - main
