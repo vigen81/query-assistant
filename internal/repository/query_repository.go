@@ -5,10 +5,12 @@ import (
 	"database/sql"
 	"fmt"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
 	"gitlab.smartbet.am/golang/query-assistant/internal/clickhouse"
+	"gitlab.smartbet.am/golang/query-assistant/internal/models"
 )
 
 type QueryRepository struct {
@@ -23,39 +25,58 @@ func NewQueryRepository(client *clickhouse.Client, logger *logrus.Logger) *Query
 	}
 }
 
-// ExecuteQuery executes a query and returns results as a slice of maps
-func (r *QueryRepository) ExecuteQuery(ctx context.Context, query string) ([]map[string]interface{}, int, time.Duration, error) {
+// ExecuteQueryWithMetadata executes a query and returns results with column metadata
+func (r *QueryRepository) ExecuteQueryWithMetadata(ctx context.Context, query string, page, pageSize int) (
+	results []map[string]interface{},
+	columns []models.ColumnMetadata,
+	totalRows int64,
+	executionTime time.Duration,
+	err error,
+) {
 	startTime := time.Now()
 
-	// Use SQL DB connection for better compatibility
+	// Skip total count for now - it can be expensive and cause timeouts
+	// In production, you'd want to cache this or use approximate counts
+	totalRows = -1 // Indicate unknown total
+
+	// Modify query for pagination
+	paginatedQuery := r.addPagination(query, page, pageSize)
+
+	// Use SQL DB connection
 	db := r.client.GetDB()
 
 	// Execute query
-	rows, err := db.QueryContext(ctx, query)
+	rows, err := db.QueryContext(ctx, paginatedQuery)
 	if err != nil {
-		return nil, 0, time.Since(startTime), fmt.Errorf("query execution failed: %w", err)
+		return nil, nil, totalRows, time.Since(startTime), fmt.Errorf("query execution failed: %w", err)
 	}
 	defer rows.Close()
 
-	// Get column names
-	columns, err := rows.Columns()
+	// Get column metadata
+	columns, err = r.extractColumnMetadata(rows)
 	if err != nil {
-		return nil, 0, time.Since(startTime), fmt.Errorf("failed to get columns: %w", err)
+		return nil, nil, totalRows, time.Since(startTime), fmt.Errorf("failed to get column metadata: %w", err)
+	}
+
+	// Get column names for scanning
+	columnNames, err := rows.Columns()
+	if err != nil {
+		return nil, nil, totalRows, time.Since(startTime), fmt.Errorf("failed to get columns: %w", err)
 	}
 
 	// Get column types
 	columnTypes, err := rows.ColumnTypes()
 	if err != nil {
-		return nil, 0, time.Since(startTime), fmt.Errorf("failed to get column types: %w", err)
+		return nil, nil, totalRows, time.Since(startTime), fmt.Errorf("failed to get column types: %w", err)
 	}
 
 	// Prepare result slice
-	var results []map[string]interface{}
+	results = []map[string]interface{}{}
 	rowCount := 0
 
 	// Create a slice of interface{} to hold pointers to each column value
-	columnPointers := make([]interface{}, len(columns))
-	columnValues := make([]interface{}, len(columns))
+	columnPointers := make([]interface{}, len(columnNames))
+	columnValues := make([]interface{}, len(columnNames))
 
 	for i := range columnValues {
 		columnPointers[i] = &columnValues[i]
@@ -63,22 +84,23 @@ func (r *QueryRepository) ExecuteQuery(ctx context.Context, query string) ([]map
 
 	// Scan rows
 	for rows.Next() {
-		// Scan the row into our column pointers
 		if err := rows.Scan(columnPointers...); err != nil {
-			return nil, rowCount, time.Since(startTime), fmt.Errorf("failed to scan row: %w", err)
+			return nil, nil, totalRows, time.Since(startTime), fmt.Errorf("failed to scan row: %w", err)
 		}
 
 		// Create a map for this row
 		rowMap := make(map[string]interface{})
-		for i, col := range columns {
+		for i, col := range columnNames {
 			val := columnValues[i]
-
-			// Handle special types and NULL values
 			if val == nil {
 				rowMap[col] = nil
 			} else {
-				// Convert based on the actual type
 				rowMap[col] = r.convertValue(val, columnTypes[i])
+			}
+
+			// Add sample value to column metadata (from first row only)
+			if rowCount == 0 && len(columns) > i {
+				columns[i].SampleValue = rowMap[col]
 			}
 		}
 
@@ -87,18 +109,189 @@ func (r *QueryRepository) ExecuteQuery(ctx context.Context, query string) ([]map
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, rowCount, time.Since(startTime), fmt.Errorf("row iteration error: %w", err)
+		return nil, nil, totalRows, time.Since(startTime), fmt.Errorf("row iteration error: %w", err)
 	}
 
-	executionTime := time.Since(startTime)
+	executionTime = time.Since(startTime)
+
+	// If we didn't get total count earlier and no pagination, use current count
+	if totalRows == 0 && page == 0 {
+		totalRows = int64(rowCount)
+	}
 
 	r.logger.WithFields(logrus.Fields{
-		"query":          query,
+		"query":          paginatedQuery,
 		"row_count":      rowCount,
+		"total_rows":     totalRows,
 		"execution_time": executionTime,
-	}).Info("Query executed successfully")
+		"page":           page,
+		"page_size":      pageSize,
+	}).Info("Query executed successfully with metadata")
 
-	return results, rowCount, executionTime, nil
+	return results, columns, totalRows, executionTime, nil
+}
+
+// extractColumnMetadata extracts metadata about the result columns
+func (r *QueryRepository) extractColumnMetadata(rows *sql.Rows) ([]models.ColumnMetadata, error) {
+	columnTypes, err := rows.ColumnTypes()
+	if err != nil {
+		return nil, err
+	}
+
+	columns := make([]models.ColumnMetadata, len(columnTypes))
+	for i, colType := range columnTypes {
+		nullable, _ := colType.Nullable()
+
+		columns[i] = models.ColumnMetadata{
+			Name:         colType.Name(),
+			Type:         r.simplifyTypeName(colType.DatabaseTypeName()),
+			DatabaseType: colType.DatabaseTypeName(),
+			Nullable:     nullable,
+			Position:     i,
+		}
+	}
+
+	return columns, nil
+}
+
+// simplifyTypeName converts database type names to simpler forms
+func (r *QueryRepository) simplifyTypeName(dbType string) string {
+	// Remove Nullable wrapper
+	dbType = strings.TrimPrefix(dbType, "Nullable(")
+	dbType = strings.TrimSuffix(dbType, ")")
+
+	// Simplify common types
+	switch {
+	case strings.HasPrefix(dbType, "UInt"):
+		return "UInt"
+	case strings.HasPrefix(dbType, "Int"):
+		return "Int"
+	case strings.HasPrefix(dbType, "Float"):
+		return "Float"
+	case strings.HasPrefix(dbType, "Decimal"):
+		return "Decimal"
+	case strings.Contains(dbType, "String"):
+		return "String"
+	case strings.Contains(dbType, "Date"):
+		return "Date"
+	case strings.Contains(dbType, "DateTime"):
+		return "DateTime"
+	case strings.Contains(dbType, "UUID"):
+		return "UUID"
+	case strings.Contains(dbType, "Array"):
+		return "Array"
+	default:
+		return dbType
+	}
+}
+
+// getQueryTotalCount wraps the query in a count to get total rows
+func (r *QueryRepository) getQueryTotalCount(ctx context.Context, query string) (int64, error) {
+	// This is disabled for now as it can cause performance issues
+	// In production, consider using EXPLAIN or approximate counts
+	return -1, fmt.Errorf("total count disabled for performance")
+
+	/*
+		// Remove LIMIT clause if present for counting
+		cleanQuery := r.removeLimitClause(query)
+
+		// Wrap in COUNT query
+		countQuery := fmt.Sprintf("SELECT COUNT(*) FROM (%s) AS subquery", cleanQuery)
+
+		r.logger.WithField("count_query", countQuery).Debug("Getting total count")
+
+		db := r.client.GetDB()
+		var count int64
+
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+
+		err := db.QueryRowContext(ctx, countQuery).Scan(&count)
+		if err != nil {
+			return 0, fmt.Errorf("failed to get total count: %w", err)
+		}
+
+		return count, nil
+	*/
+}
+
+// removeLimitClause removes LIMIT clause from query
+func (r *QueryRepository) removeLimitClause(query string) string {
+	// Simple regex to remove LIMIT clause
+	// This is a simplified version - for production, use a proper SQL parser
+	upperQuery := strings.ToUpper(query)
+	limitIndex := strings.LastIndex(upperQuery, "LIMIT")
+
+	if limitIndex > 0 {
+		// Check if this is actually a LIMIT clause (not in a string or comment)
+		beforeLimit := query[:limitIndex]
+		// Remove trailing whitespace and semicolon
+		beforeLimit = strings.TrimSpace(beforeLimit)
+		beforeLimit = strings.TrimSuffix(beforeLimit, ";")
+		return beforeLimit
+	}
+
+	return strings.TrimSuffix(strings.TrimSpace(query), ";")
+}
+
+// addPagination adds LIMIT and OFFSET to a query for pagination
+func (r *QueryRepository) addPagination(query string, page, pageSize int) string {
+	// If no pagination requested (page=0 or pageSize=0), return query as-is
+	if page <= 0 || pageSize <= 0 {
+		return query
+	}
+
+	// Remove existing LIMIT clause if present
+	query = r.removeLimitClause(query)
+
+	// Calculate offset
+	offset := (page - 1) * pageSize
+
+	// Add pagination
+	return fmt.Sprintf("%s LIMIT %d OFFSET %d", query, pageSize, offset)
+}
+
+// ExecuteQuery - Legacy method for backward compatibility
+func (r *QueryRepository) ExecuteQuery(ctx context.Context, query string) ([]map[string]interface{}, int, time.Duration, error) {
+	results, _, _, executionTime, err := r.ExecuteQueryWithMetadata(ctx, query, 0, 0)
+	if err != nil {
+		return nil, 0, executionTime, err
+	}
+	return results, len(results), executionTime, nil
+}
+
+// GetQueryStatistics gets execution statistics for a query
+func (r *QueryRepository) GetQueryStatistics(ctx context.Context, query string) (*models.QueryStatistics, error) {
+	// Get query execution plan with statistics
+	explainQuery := fmt.Sprintf("EXPLAIN ESTIMATE %s", query)
+
+	db := r.client.GetDB()
+	rows, err := db.QueryContext(ctx, explainQuery)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get query statistics: %w", err)
+	}
+	defer rows.Close()
+
+	stats := &models.QueryStatistics{}
+
+	// Parse the EXPLAIN output to extract statistics
+	// This is simplified - actual implementation would parse the output properly
+	for rows.Next() {
+		var line string
+		if err := rows.Scan(&line); err != nil {
+			continue
+		}
+
+		// Parse estimated rows, bytes, etc. from the explain output
+		if strings.Contains(line, "rows") {
+			// Extract row count estimation
+		}
+		if strings.Contains(line, "bytes") {
+			// Extract bytes estimation
+		}
+	}
+
+	return stats, nil
 }
 
 // convertValue converts database values to appropriate Go types
@@ -141,111 +334,6 @@ func (r *QueryRepository) convertValue(value interface{}, columnType *sql.Column
 		if rv.Kind() == reflect.Ptr && !rv.IsNil() {
 			return rv.Elem().Interface()
 		}
-		return value
-	}
-}
-
-// ExecuteQueryNative executes a query using the native ClickHouse connection (alternative method)
-func (r *QueryRepository) ExecuteQueryNative(ctx context.Context, query string) ([]map[string]interface{}, int, time.Duration, error) {
-	startTime := time.Now()
-
-	// Use native connection
-	conn := r.client.GetConn()
-
-	// Execute query
-	rows, err := conn.Query(ctx, query)
-	if err != nil {
-		return nil, 0, time.Since(startTime), fmt.Errorf("query execution failed: %w", err)
-	}
-	defer rows.Close()
-
-	// Get column names
-	columns := rows.Columns()
-	columnTypes := rows.ColumnTypes()
-
-	// Prepare result slice
-	var results []map[string]interface{}
-	rowCount := 0
-
-	// Scan rows
-	for rows.Next() {
-		// Create a slice to hold column values
-		values := make([]interface{}, len(columns))
-
-		// Create the appropriate type for each column based on its type
-		for i, colType := range columnTypes {
-			values[i] = r.createScanType(colType)
-		}
-
-		// Scan the row
-		if err := rows.Scan(values...); err != nil {
-			return nil, rowCount, time.Since(startTime), fmt.Errorf("failed to scan row: %w", err)
-		}
-
-		// Create a map for this row
-		rowMap := make(map[string]interface{})
-		for i, col := range columns {
-			rowMap[col] = r.extractValue(values[i])
-		}
-
-		results = append(results, rowMap)
-		rowCount++
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, rowCount, time.Since(startTime), fmt.Errorf("row iteration error: %w", err)
-	}
-
-	executionTime := time.Since(startTime)
-
-	r.logger.WithFields(logrus.Fields{
-		"query":          query,
-		"row_count":      rowCount,
-		"execution_time": executionTime,
-	}).Info("Query executed successfully")
-
-	return results, rowCount, executionTime, nil
-}
-
-// createScanType creates the appropriate scan type based on column type
-func (r *QueryRepository) createScanType(colType interface{}) interface{} {
-	// This is a simplified version - you might need to expand based on your ClickHouse types
-	// For now, we'll use interface{} pointers for everything
-	var v interface{}
-	return &v
-}
-
-// extractValue extracts the actual value from a scanned pointer
-func (r *QueryRepository) extractValue(value interface{}) interface{} {
-	if value == nil {
-		return nil
-	}
-
-	// If it's a pointer to interface{}, dereference it
-	if ptr, ok := value.(*interface{}); ok && ptr != nil {
-		return r.convertSimpleValue(*ptr)
-	}
-
-	return r.convertSimpleValue(value)
-}
-
-// convertSimpleValue converts common types to JSON-friendly formats
-func (r *QueryRepository) convertSimpleValue(value interface{}) interface{} {
-	if value == nil {
-		return nil
-	}
-
-	switch v := value.(type) {
-	case []byte:
-		return string(v)
-	case time.Time:
-		return v.Format(time.RFC3339)
-	case *time.Time:
-		if v != nil {
-			return v.Format(time.RFC3339)
-		}
-		return nil
-	default:
 		return value
 	}
 }
@@ -298,18 +386,5 @@ func (r *QueryRepository) GetQueryPlan(ctx context.Context, query string) (strin
 
 // contains checks if a string contains a substring
 func contains(s, substr string) bool {
-	return len(s) >= len(substr) && len(substr) > 0 &&
-		(s == substr || len(s) > len(substr) &&
-			(s[:len(substr)] == substr || s[len(s)-len(substr):] == substr ||
-				len(s) > len(substr)*2 && findSubstring(s, substr)))
-}
-
-// findSubstring checks if substr exists in s
-func findSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
+	return strings.Contains(s, substr)
 }

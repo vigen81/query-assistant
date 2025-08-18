@@ -1,12 +1,45 @@
 basePath: /api/v1
 definitions:
+  models.ColumnMetadata:
+    properties:
+      database_type:
+        example: UInt64
+        type: string
+      name:
+        example: user_id
+        type: string
+      nullable:
+        example: false
+        type: boolean
+      position:
+        example: 0
+        type: integer
+      sample_value:
+        example: "12345"
+        type: string
+      type:
+        example: UInt64
+        type: string
+    type: object
   models.ColumnSchema:
     properties:
+      default_value:
+        description: New fields
+        type: string
       description:
         example: Unique user identifier
         type: string
       is_nullable:
         example: false
+        type: boolean
+      is_partition_key:
+        example: false
+        type: boolean
+      is_primary_key:
+        example: true
+        type: boolean
+      is_sorting_key:
+        example: true
         type: boolean
       name:
         example: user_id
@@ -61,10 +94,82 @@ definitions:
         example: 1.0.0
         type: string
     type: object
+  models.PaginationInfo:
+    properties:
+      has_next:
+        example: true
+        type: boolean
+      has_previous:
+        example: false
+        type: boolean
+      next_page:
+        example: 2
+        type: integer
+      page:
+        example: 1
+        type: integer
+      page_size:
+        example: 100
+        type: integer
+      previous_page:
+        type: integer
+      total_pages:
+        example: 10
+        type: integer
+      total_rows:
+        example: 1000
+        type: integer
+    type: object
+  models.QueryHistory:
+    properties:
+      created_at:
+        example: "2023-01-01T00:00:00Z"
+        type: string
+      error:
+        type: string
+      execution_time:
+        example: 0.156
+        type: number
+      generated_sql:
+        example: SELECT month, SUM(sales) FROM sales_table GROUP BY month
+        type: string
+      prompt:
+        example: Show total sales by month
+        type: string
+      query_id:
+        example: 550e8400-e29b-41d4-a716-446655440000
+        type: string
+      row_count:
+        example: 12
+        type: integer
+      status:
+        example: success
+        type: string
+      user_id:
+        example: user123
+        type: string
+    type: object
   models.QueryRequest:
     properties:
       context:
         type: object
+      include_schema:
+        description: Response options
+        example: true
+        type: boolean
+      include_stats:
+        example: true
+        type: boolean
+      page:
+        description: Pagination options
+        example: 1
+        minimum: 1
+        type: integer
+      page_size:
+        example: 100
+        maximum: 10000
+        minimum: 1
+        type: integer
       prompt:
         example: Show me the top 10 users by total purchase amount in the last 30
           days
@@ -77,6 +182,13 @@ definitions:
     type: object
   models.QueryResponse:
     properties:
+      cache_key:
+        type: string
+      columns:
+        description: New fields for column metadata and pagination
+        items:
+          $ref: '#/definitions/models.ColumnMetadata'
+        type: array
       execution_time:
         example: 0.234
         type: number
@@ -84,6 +196,8 @@ definitions:
         example: SELECT user_id, SUM(amount) as total FROM purchases WHERE date >=
           today() - 30 GROUP BY user_id ORDER BY total DESC LIMIT 10
         type: string
+      pagination:
+        $ref: '#/definitions/models.PaginationInfo'
       prompt:
         example: Show me the top 10 users by total purchase amount
         type: string
@@ -95,11 +209,42 @@ definitions:
           type: object
         type: array
       row_count:
+        description: Legacy fields (kept for backward compatibility)
         example: 10
         type: integer
+      statistics:
+        $ref: '#/definitions/models.QueryStatistics'
       timestamp:
         example: "2023-01-01T00:00:00Z"
         type: string
+      warnings:
+        description: Additional metadata
+        example:
+        - '[''Query processed large amount of data'']'
+        items:
+          type: string
+        type: array
+    type: object
+  models.QueryStatistics:
+    properties:
+      bytes_processed:
+        example: 1048576
+        type: integer
+      cache_hit:
+        example: false
+        type: boolean
+      execution_time_ms:
+        example: 234.5
+        type: number
+      partitions_accessed:
+        example: 3
+        type: integer
+      rows_returned:
+        example: 100
+        type: integer
+      total_rows:
+        example: 50000
+        type: integer
     type: object
   models.QueryValidationResult:
     properties:
@@ -111,7 +256,18 @@ definitions:
         items:
           type: string
         type: array
+      estimated_cost:
+        example: low
+        type: string
+      estimated_rows:
+        description: New fields
+        example: 10000
+        type: integer
       operations:
+        items:
+          type: string
+        type: array
+      optimizations:
         items:
           type: string
         type: array
@@ -148,12 +304,24 @@ definitions:
       engine:
         example: MergeTree
         type: string
+      last_modified:
+        type: string
       name:
         example: users
+        type: string
+      partition_key:
+        description: New fields
+        example: toYYYYMM(created_at)
         type: string
       row_count:
         example: 1000000
         type: integer
+      size_bytes:
+        example: 104857600
+        type: integer
+      sorting_key:
+        example: user_id
+        type: string
     type: object
 host: localhost:8080
 info:
@@ -209,9 +377,9 @@ paths:
       consumes:
       - application/json
       description: Convert a natural language prompt to SQL and execute it against
-        ClickHouse
+        ClickHouse with optional pagination and column metadata
       parameters:
-      - description: Query request
+      - description: Query request with optional pagination
         in: body
         name: query
         required: true
@@ -221,19 +389,20 @@ paths:
       - application/json
       responses:
         "200":
-          description: OK
+          description: Successful query execution with results, column metadata, and
+            pagination info
           schema:
             $ref: '#/definitions/models.QueryResponse'
         "400":
-          description: Bad Request
+          description: Invalid request
           schema:
             $ref: '#/definitions/models.ErrorResponse'
         "408":
-          description: Request Timeout
+          description: Query timeout
           schema:
             $ref: '#/definitions/models.ErrorResponse'
         "500":
-          description: Internal Server Error
+          description: Internal server error
           schema:
             $ref: '#/definitions/models.ErrorResponse'
       summary: Execute a natural language query
@@ -258,20 +427,53 @@ paths:
       - application/json
       responses:
         "200":
-          description: OK
+          description: Generated SQL query with metadata
           schema:
-            additionalProperties:
-              type: string
+            additionalProperties: true
             type: object
         "400":
-          description: Bad Request
+          description: Invalid request
           schema:
             $ref: '#/definitions/models.ErrorResponse'
         "500":
-          description: Internal Server Error
+          description: Internal server error
           schema:
             $ref: '#/definitions/models.ErrorResponse'
       summary: Generate SQL query
+      tags:
+      - query
+  /query/history:
+    get:
+      description: Retrieve the history of previously executed queries with pagination
+      parameters:
+      - default: 1
+        description: Page number
+        in: query
+        name: page
+        type: integer
+      - default: 50
+        description: Page size
+        in: query
+        name: page_size
+        type: integer
+      - description: Filter by user ID
+        in: query
+        name: user_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of historical queries
+          schema:
+            items:
+              $ref: '#/definitions/models.QueryHistory'
+            type: array
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      summary: Get query history
       tags:
       - query
   /query/validate:
@@ -279,7 +481,7 @@ paths:
       consumes:
       - application/json
       description: Validate a SQL query for syntax and security without executing
-        it
+        it, with optimization suggestions
       parameters:
       - description: Query to validate
         in: body
@@ -293,15 +495,15 @@ paths:
       - application/json
       responses:
         "200":
-          description: OK
+          description: Validation result with warnings and optimization suggestions
           schema:
             $ref: '#/definitions/models.QueryValidationResult'
         "400":
-          description: Bad Request
+          description: Invalid request
           schema:
             $ref: '#/definitions/models.ErrorResponse'
         "500":
-          description: Internal Server Error
+          description: Internal server error
           schema:
             $ref: '#/definitions/models.ErrorResponse'
       summary: Validate a SQL query

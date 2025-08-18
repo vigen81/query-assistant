@@ -58,7 +58,7 @@ const docTemplate = `{
         },
         "/query/execute": {
             "post": {
-                "description": "Convert a natural language prompt to SQL and execute it against ClickHouse",
+                "description": "Convert a natural language prompt to SQL and execute it against ClickHouse with optional pagination and column metadata",
                 "consumes": [
                     "application/json"
                 ],
@@ -71,7 +71,7 @@ const docTemplate = `{
                 "summary": "Execute a natural language query",
                 "parameters": [
                     {
-                        "description": "Query request",
+                        "description": "Query request with optional pagination",
                         "name": "query",
                         "in": "body",
                         "required": true,
@@ -82,25 +82,25 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "OK",
+                        "description": "Successful query execution with results, column metadata, and pagination info",
                         "schema": {
                             "$ref": "#/definitions/models.QueryResponse"
                         }
                     },
                     "400": {
-                        "description": "Bad Request",
+                        "description": "Invalid request",
                         "schema": {
                             "$ref": "#/definitions/models.ErrorResponse"
                         }
                     },
                     "408": {
-                        "description": "Request Timeout",
+                        "description": "Query timeout",
                         "schema": {
                             "$ref": "#/definitions/models.ErrorResponse"
                         }
                     },
                     "500": {
-                        "description": "Internal Server Error",
+                        "description": "Internal server error",
                         "schema": {
                             "$ref": "#/definitions/models.ErrorResponse"
                         }
@@ -137,22 +137,71 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "OK",
+                        "description": "Generated SQL query with metadata",
                         "schema": {
                             "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "additionalProperties": true
                         }
                     },
                     "400": {
-                        "description": "Bad Request",
+                        "description": "Invalid request",
                         "schema": {
                             "$ref": "#/definitions/models.ErrorResponse"
                         }
                     },
                     "500": {
-                        "description": "Internal Server Error",
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/query/history": {
+            "get": {
+                "description": "Retrieve the history of previously executed queries with pagination",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "query"
+                ],
+                "summary": "Get query history",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "Page number",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 50,
+                        "description": "Page size",
+                        "name": "page_size",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by user ID",
+                        "name": "user_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "List of historical queries",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/models.QueryHistory"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
                         "schema": {
                             "$ref": "#/definitions/models.ErrorResponse"
                         }
@@ -162,7 +211,7 @@ const docTemplate = `{
         },
         "/query/validate": {
             "post": {
-                "description": "Validate a SQL query for syntax and security without executing it",
+                "description": "Validate a SQL query for syntax and security without executing it, with optimization suggestions",
                 "consumes": [
                     "application/json"
                 ],
@@ -189,19 +238,19 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "OK",
+                        "description": "Validation result with warnings and optimization suggestions",
                         "schema": {
                             "$ref": "#/definitions/models.QueryValidationResult"
                         }
                     },
                     "400": {
-                        "description": "Bad Request",
+                        "description": "Invalid request",
                         "schema": {
                             "$ref": "#/definitions/models.ErrorResponse"
                         }
                     },
                     "500": {
-                        "description": "Internal Server Error",
+                        "description": "Internal server error",
                         "schema": {
                             "$ref": "#/definitions/models.ErrorResponse"
                         }
@@ -339,9 +388,42 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "models.ColumnMetadata": {
+            "type": "object",
+            "properties": {
+                "database_type": {
+                    "type": "string",
+                    "example": "UInt64"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "user_id"
+                },
+                "nullable": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "position": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "sample_value": {
+                    "type": "string",
+                    "example": "12345"
+                },
+                "type": {
+                    "type": "string",
+                    "example": "UInt64"
+                }
+            }
+        },
         "models.ColumnSchema": {
             "type": "object",
             "properties": {
+                "default_value": {
+                    "description": "New fields",
+                    "type": "string"
+                },
                 "description": {
                     "type": "string",
                     "example": "Unique user identifier"
@@ -349,6 +431,18 @@ const docTemplate = `{
                 "is_nullable": {
                     "type": "boolean",
                     "example": false
+                },
+                "is_partition_key": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "is_primary_key": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "is_sorting_key": {
+                    "type": "boolean",
+                    "example": true
                 },
                 "name": {
                     "type": "string",
@@ -425,11 +519,108 @@ const docTemplate = `{
                 }
             }
         },
+        "models.PaginationInfo": {
+            "type": "object",
+            "properties": {
+                "has_next": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "has_previous": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "next_page": {
+                    "type": "integer",
+                    "example": 2
+                },
+                "page": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "page_size": {
+                    "type": "integer",
+                    "example": 100
+                },
+                "previous_page": {
+                    "type": "integer"
+                },
+                "total_pages": {
+                    "type": "integer",
+                    "example": 10
+                },
+                "total_rows": {
+                    "type": "integer",
+                    "example": 1000
+                }
+            }
+        },
+        "models.QueryHistory": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string",
+                    "example": "2023-01-01T00:00:00Z"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "execution_time": {
+                    "type": "number",
+                    "example": 0.156
+                },
+                "generated_sql": {
+                    "type": "string",
+                    "example": "SELECT month, SUM(sales) FROM sales_table GROUP BY month"
+                },
+                "prompt": {
+                    "type": "string",
+                    "example": "Show total sales by month"
+                },
+                "query_id": {
+                    "type": "string",
+                    "example": "550e8400-e29b-41d4-a716-446655440000"
+                },
+                "row_count": {
+                    "type": "integer",
+                    "example": 12
+                },
+                "status": {
+                    "type": "string",
+                    "example": "success"
+                },
+                "user_id": {
+                    "type": "string",
+                    "example": "user123"
+                }
+            }
+        },
         "models.QueryRequest": {
             "type": "object",
             "properties": {
                 "context": {
                     "type": "object"
+                },
+                "include_schema": {
+                    "description": "Response options",
+                    "type": "boolean",
+                    "example": true
+                },
+                "include_stats": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "page": {
+                    "description": "Pagination options",
+                    "type": "integer",
+                    "minimum": 1,
+                    "example": 1
+                },
+                "page_size": {
+                    "type": "integer",
+                    "maximum": 10000,
+                    "minimum": 1,
+                    "example": 100
                 },
                 "prompt": {
                     "type": "string",
@@ -446,6 +637,16 @@ const docTemplate = `{
         "models.QueryResponse": {
             "type": "object",
             "properties": {
+                "cache_key": {
+                    "type": "string"
+                },
+                "columns": {
+                    "description": "New fields for column metadata and pagination",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.ColumnMetadata"
+                    }
+                },
                 "execution_time": {
                     "type": "number",
                     "example": 0.234
@@ -453,6 +654,9 @@ const docTemplate = `{
                 "generated_sql": {
                     "type": "string",
                     "example": "SELECT user_id, SUM(amount) as total FROM purchases WHERE date \u003e= today() - 30 GROUP BY user_id ORDER BY total DESC LIMIT 10"
+                },
+                "pagination": {
+                    "$ref": "#/definitions/models.PaginationInfo"
                 },
                 "prompt": {
                     "type": "string",
@@ -469,12 +673,55 @@ const docTemplate = `{
                     }
                 },
                 "row_count": {
+                    "description": "Legacy fields (kept for backward compatibility)",
                     "type": "integer",
                     "example": 10
+                },
+                "statistics": {
+                    "$ref": "#/definitions/models.QueryStatistics"
                 },
                 "timestamp": {
                     "type": "string",
                     "example": "2023-01-01T00:00:00Z"
+                },
+                "warnings": {
+                    "description": "Additional metadata",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "['Query processed large amount of data']"
+                    ]
+                }
+            }
+        },
+        "models.QueryStatistics": {
+            "type": "object",
+            "properties": {
+                "bytes_processed": {
+                    "type": "integer",
+                    "example": 1048576
+                },
+                "cache_hit": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "execution_time_ms": {
+                    "type": "number",
+                    "example": 234.5
+                },
+                "partitions_accessed": {
+                    "type": "integer",
+                    "example": 3
+                },
+                "rows_returned": {
+                    "type": "integer",
+                    "example": 100
+                },
+                "total_rows": {
+                    "type": "integer",
+                    "example": 50000
                 }
             }
         },
@@ -493,7 +740,22 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "estimated_cost": {
+                    "type": "string",
+                    "example": "low"
+                },
+                "estimated_rows": {
+                    "description": "New fields",
+                    "type": "integer",
+                    "example": 10000
+                },
                 "operations": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "optimizations": {
                     "type": "array",
                     "items": {
                         "type": "string"
@@ -548,13 +810,29 @@ const docTemplate = `{
                     "type": "string",
                     "example": "MergeTree"
                 },
+                "last_modified": {
+                    "type": "string"
+                },
                 "name": {
                     "type": "string",
                     "example": "users"
                 },
+                "partition_key": {
+                    "description": "New fields",
+                    "type": "string",
+                    "example": "toYYYYMM(created_at)"
+                },
                 "row_count": {
                     "type": "integer",
                     "example": 1000000
+                },
+                "size_bytes": {
+                    "type": "integer",
+                    "example": 104857600
+                },
+                "sorting_key": {
+                    "type": "string",
+                    "example": "user_id"
                 }
             }
         }
