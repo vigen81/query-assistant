@@ -64,6 +64,8 @@ IMPORTANT RULES:
 6. Add LIMIT clause (default to 100 rows if not specified)
 7. The query must be ready to execute as-is
 8. ignore _peerdb_* fields AT all
+9. use final for rmt table
+10. add created_at range to tables if possible
 
 Example format:
 SELECT column1, column2 FROM table WHERE condition LIMIT 100`, prompt)
