@@ -279,6 +279,6 @@ func (r *SchemaRepository) GetTableSchema(ctx context.Context, tableName string)
 }
 
 // contains checks if a string contains a substring
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && s[:len(substr)] == substr
-}
+//func contains(s, substr string) bool {
+//	return len(s) >= len(substr) && s[:len(substr)] == substr
+//}

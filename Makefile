@@ -133,15 +133,13 @@ format: ## Format code
 api-health: ## Test health endpoint
 	curl -X GET http://localhost:8080/health
 
-api-query: ## Test query endpoint (requires auth token if not skipped)
+api-query: ## Test query endpoint
 	curl -X POST http://localhost:8080/api/v1/query/execute \
-		-H "Authorization: Bearer test-token" \
 		-H "Content-Type: application/json" \
 		-d '{"prompt":"Show me the top 10 users by total purchase amount"}'
 
 api-schema: ## Get database schema
-	curl -X GET http://localhost:8080/api/v1/schema \
-		-H "Authorization: Bearer test-token"
+	curl -X GET http://localhost:8080/api/v1/schema
 
 api-docs: ## Open API documentation
 	open http://localhost:8080/swagger/

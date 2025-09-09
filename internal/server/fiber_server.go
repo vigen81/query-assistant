@@ -13,7 +13,6 @@ import (
 	"github.com/sirupsen/logrus"
 	"gitlab.smartbet.am/golang/query-assistant/internal/config"
 	"gitlab.smartbet.am/golang/query-assistant/internal/handlers"
-	"gitlab.smartbet.am/golang/query-assistant/internal/middleware"
 )
 
 type FiberServer struct {
@@ -47,7 +46,7 @@ func NewFiberServer(
 	}))
 	app.Use(cors.New(cors.Config{
 		AllowOrigins: "*",
-		AllowHeaders: "Origin, Content-Type, Accept, Authorization",
+		AllowHeaders: "Origin, Content-Type, Accept",
 		AllowMethods: "GET, POST, PUT, DELETE, OPTIONS",
 	}))
 
@@ -77,11 +76,6 @@ func (s *FiberServer) setupRoutes() {
 
 	// API v1 routes
 	v1 := s.app.Group("/api/v1")
-
-	// Apply auth middleware unless skip_auth is true
-	if !s.config.Auth.SkipAuth {
-		v1.Use(middleware.AuthMiddleware(s.config))
-	}
 
 	// Health endpoints also under /api/v1
 	v1.Get("/health", s.healthHandler.HealthCheck)

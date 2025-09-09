@@ -1,0 +1,604 @@
+basePath: /api/v1
+definitions:
+  models.ColumnMetadata:
+    properties:
+      database_type:
+        example: UInt64
+        type: string
+      name:
+        example: user_id
+        type: string
+      nullable:
+        example: false
+        type: boolean
+      position:
+        example: 0
+        type: integer
+      sample_value:
+        example: "12345"
+        type: string
+      type:
+        example: UInt64
+        type: string
+    type: object
+  models.ColumnSchema:
+    properties:
+      default_value:
+        description: New fields
+        type: string
+      description:
+        example: Unique user identifier
+        type: string
+      is_nullable:
+        example: false
+        type: boolean
+      is_partition_key:
+        example: false
+        type: boolean
+      is_primary_key:
+        example: true
+        type: boolean
+      is_sorting_key:
+        example: true
+        type: boolean
+      name:
+        example: user_id
+        type: string
+      type:
+        example: UInt64
+        type: string
+    type: object
+  models.ErrorResponse:
+    properties:
+      code:
+        example: VALIDATION_ERROR
+        type: string
+      details:
+        type: object
+      error:
+        example: Query validation failed
+        type: string
+      message:
+        example: 'Query contains forbidden operation: DROP'
+        type: string
+      query_id:
+        example: 550e8400-e29b-41d4-a716-446655440000
+        type: string
+      timestamp:
+        example: "2023-01-01T00:00:00Z"
+        type: string
+    type: object
+  models.HealthCheckDetail:
+    properties:
+      clickhouse:
+        example: ok
+        type: string
+      openai:
+        example: ok
+        type: string
+    type: object
+  models.HealthResponse:
+    properties:
+      checks:
+        $ref: '#/definitions/models.HealthCheckDetail'
+      service:
+        example: query-assistant
+        type: string
+      status:
+        example: ok
+        type: string
+      timestamp:
+        example: "2023-01-01T00:00:00Z"
+        type: string
+      version:
+        example: 1.0.0
+        type: string
+    type: object
+  models.PaginationInfo:
+    properties:
+      has_next:
+        example: true
+        type: boolean
+      has_previous:
+        example: false
+        type: boolean
+      next_page:
+        example: 2
+        type: integer
+      page:
+        example: 1
+        type: integer
+      page_size:
+        example: 100
+        type: integer
+      previous_page:
+        type: integer
+      total_pages:
+        example: 10
+        type: integer
+      total_rows:
+        example: 1000
+        type: integer
+    type: object
+  models.QueryHistory:
+    properties:
+      created_at:
+        example: "2023-01-01T00:00:00Z"
+        type: string
+      error:
+        type: string
+      execution_time:
+        example: 0.156
+        type: number
+      generated_sql:
+        example: SELECT month, SUM(sales) FROM sales_table GROUP BY month
+        type: string
+      prompt:
+        example: Show total sales by month
+        type: string
+      query_id:
+        example: 550e8400-e29b-41d4-a716-446655440000
+        type: string
+      row_count:
+        example: 12
+        type: integer
+      status:
+        example: success
+        type: string
+      user_id:
+        example: user123
+        type: string
+    type: object
+  models.QueryRequest:
+    properties:
+      context:
+        type: object
+      include_schema:
+        description: Response options
+        example: true
+        type: boolean
+      include_stats:
+        example: true
+        type: boolean
+      page:
+        description: Pagination options
+        example: 1
+        minimum: 1
+        type: integer
+      page_size:
+        example: 100
+        maximum: 10000
+        minimum: 1
+        type: integer
+      prompt:
+        example: Show me the top 10 users by total purchase amount in the last 30
+          days
+        type: string
+      timeout:
+        example: 30
+        maximum: 300
+        minimum: 1
+        type: integer
+    type: object
+  models.QueryResponse:
+    properties:
+      cache_key:
+        type: string
+      columns:
+        description: New fields for column metadata and pagination
+        items:
+          $ref: '#/definitions/models.ColumnMetadata'
+        type: array
+      execution_time:
+        example: 0.234
+        type: number
+      generated_sql:
+        example: SELECT user_id, SUM(amount) as total FROM purchases WHERE date >=
+          today() - 30 GROUP BY user_id ORDER BY total DESC LIMIT 10
+        type: string
+      pagination:
+        $ref: '#/definitions/models.PaginationInfo'
+      prompt:
+        example: Show me the top 10 users by total purchase amount
+        type: string
+      query_id:
+        example: 550e8400-e29b-41d4-a716-446655440000
+        type: string
+      results:
+        items:
+          type: object
+        type: array
+      row_count:
+        description: Legacy fields (kept for backward compatibility)
+        example: 10
+        type: integer
+      statistics:
+        $ref: '#/definitions/models.QueryStatistics'
+      timestamp:
+        example: "2023-01-01T00:00:00Z"
+        type: string
+      warnings:
+        description: Additional metadata
+        example:
+        - '[''Query processed large amount of data'']'
+        items:
+          type: string
+        type: array
+    type: object
+  models.QueryStatistics:
+    properties:
+      bytes_processed:
+        example: 1048576
+        type: integer
+      cache_hit:
+        example: false
+        type: boolean
+      execution_time_ms:
+        example: 234.5
+        type: number
+      partitions_accessed:
+        example: 3
+        type: integer
+      rows_returned:
+        example: 100
+        type: integer
+      total_rows:
+        example: 50000
+        type: integer
+    type: object
+  models.QueryValidationResult:
+    properties:
+      columns:
+        items:
+          type: string
+        type: array
+      errors:
+        items:
+          type: string
+        type: array
+      estimated_cost:
+        example: low
+        type: string
+      estimated_rows:
+        description: New fields
+        example: 10000
+        type: integer
+      operations:
+        items:
+          type: string
+        type: array
+      optimizations:
+        items:
+          type: string
+        type: array
+      tables:
+        items:
+          type: string
+        type: array
+      valid:
+        type: boolean
+      warnings:
+        items:
+          type: string
+        type: array
+    type: object
+  models.SchemaInfo:
+    properties:
+      database:
+        example: analytics
+        type: string
+      tables:
+        items:
+          $ref: '#/definitions/models.TableSchema'
+        type: array
+    type: object
+  models.TableSchema:
+    properties:
+      columns:
+        items:
+          $ref: '#/definitions/models.ColumnSchema'
+        type: array
+      description:
+        example: User information table
+        type: string
+      engine:
+        example: MergeTree
+        type: string
+      last_modified:
+        type: string
+      name:
+        example: users
+        type: string
+      partition_key:
+        description: New fields
+        example: toYYYYMM(created_at)
+        type: string
+      row_count:
+        example: 1000000
+        type: integer
+      size_bytes:
+        example: 104857600
+        type: integer
+      sorting_key:
+        example: user_id
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  description: |-
+    An intelligent query assistant that uses ChatGPT to generate and execute ClickHouse queries based on natural language prompts.
+
+    ## Features
+    - **Natural Language Processing**: Convert plain English prompts to ClickHouse SQL queries
+    - **Schema-Aware**: Understands your database schema for accurate query generation
+    - **Query Execution**: Automatically executes generated queries with timeout protection
+    - **Secure**: Query validation and execution limits
+    - **Observable**: Structured logging with Graylog integration
+
+    ## How it works
+    1. User submits a natural language prompt about their data
+    2. System sends the prompt along with schema information to ChatGPT
+    3. ChatGPT generates an appropriate ClickHouse query
+    4. System validates and executes the query with timeout protection
+    5. Results are formatted and returned to the user
+  termsOfService: http://swagger.io/terms/
+  title: Query Assistant API
+  version: "1.0"
+paths:
+  /health:
+    get:
+      description: Returns the general health status of the query assistant service
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Service is healthy
+          schema:
+            $ref: '#/definitions/models.HealthResponse'
+      summary: Health check
+      tags:
+      - health
+  /live:
+    get:
+      description: Returns the liveness status of the query assistant
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Service is alive
+          schema:
+            $ref: '#/definitions/models.HealthResponse'
+      summary: Liveness check
+      tags:
+      - health
+  /query/execute:
+    post:
+      consumes:
+      - application/json
+      description: Convert a natural language prompt to SQL and execute it against
+        ClickHouse with optional pagination and column metadata
+      parameters:
+      - description: Query request with optional pagination
+        in: body
+        name: query
+        required: true
+        schema:
+          $ref: '#/definitions/models.QueryRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Successful query execution with results, column metadata, and
+            pagination info
+          schema:
+            $ref: '#/definitions/models.QueryResponse'
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "408":
+          description: Query timeout
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      summary: Execute a natural language query
+      tags:
+      - query
+  /query/generate:
+    post:
+      consumes:
+      - application/json
+      description: Generate a SQL query from natural language prompt without executing
+        it
+      parameters:
+      - description: Generation request
+        in: body
+        name: request
+        required: true
+        schema:
+          additionalProperties:
+            type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Generated SQL query with metadata
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      summary: Generate SQL query
+      tags:
+      - query
+  /query/history:
+    get:
+      description: Retrieve the history of previously executed queries with pagination
+      parameters:
+      - default: 1
+        description: Page number
+        in: query
+        name: page
+        type: integer
+      - default: 50
+        description: Page size
+        in: query
+        name: page_size
+        type: integer
+      - description: Filter by user ID
+        in: query
+        name: user_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of historical queries
+          schema:
+            items:
+              $ref: '#/definitions/models.QueryHistory'
+            type: array
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      summary: Get query history
+      tags:
+      - query
+  /query/validate:
+    post:
+      consumes:
+      - application/json
+      description: Validate a SQL query for syntax and security without executing
+        it, with optimization suggestions
+      parameters:
+      - description: Query to validate
+        in: body
+        name: query
+        required: true
+        schema:
+          additionalProperties:
+            type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Validation result with warnings and optimization suggestions
+          schema:
+            $ref: '#/definitions/models.QueryValidationResult'
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      summary: Validate a SQL query
+      tags:
+      - query
+  /ready:
+    get:
+      description: Returns the readiness status of the query assistant including dependency
+        checks
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Service is ready to accept requests
+          schema:
+            $ref: '#/definitions/models.HealthResponse'
+        "503":
+          description: Service is not ready - dependencies not available
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      summary: Readiness check
+      tags:
+      - health
+  /schema:
+    get:
+      description: Get the complete database schema including all tables and columns
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.SchemaInfo'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      summary: Get database schema
+      tags:
+      - schema
+  /schema/refresh:
+    post:
+      description: Manually refresh the database schema cache
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      summary: Refresh schema cache
+      tags:
+      - schema
+  /schema/table/{table}:
+    get:
+      description: Get schema information for a specific table
+      parameters:
+      - description: Table name
+        in: path
+        name: table
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.TableSchema'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      summary: Get table schema
+      tags:
+      - schema
+swagger: "2.0"
+tags:
+- description: Query generation and execution operations
+  name: query
+- description: Database schema information
+  name: schema
+- description: Health and readiness checks
+  name: health

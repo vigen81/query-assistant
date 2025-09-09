@@ -9,17 +9,63 @@ type QueryRequest struct {
 	Prompt  string                 `json:"prompt" example:"Show me the top 10 users by total purchase amount in the last 30 days"`
 	Context map[string]interface{} `json:"context,omitempty" swaggertype:"object"`
 	Timeout int                    `json:"timeout,omitempty" example:"30" minimum:"1" maximum:"300"`
+	// Pagination options
+	Page     int `json:"page,omitempty" example:"1" minimum:"1"`
+	PageSize int `json:"page_size,omitempty" example:"100" minimum:"1" maximum:"10000"`
+	// Response options
+	IncludeSchema bool `json:"include_schema,omitempty" example:"true"`
+	IncludeStats  bool `json:"include_stats,omitempty" example:"true"`
 }
 
-// QueryResponse represents the response for a query request
+// ColumnMetadata represents metadata about a result column
+type ColumnMetadata struct {
+	Name         string      `json:"name" example:"user_id"`
+	Type         string      `json:"type" example:"UInt64"`
+	DatabaseType string      `json:"database_type" example:"UInt64"`
+	Nullable     bool        `json:"nullable" example:"false"`
+	Position     int         `json:"position" example:"0"`
+	SampleValue  interface{} `json:"sample_value,omitempty" swaggertype:"string" example:"12345"`
+}
+
+// QueryStatistics represents statistics about the query execution
+type QueryStatistics struct {
+	TotalRows          int64   `json:"total_rows" example:"50000"`
+	RowsReturned       int     `json:"rows_returned" example:"100"`
+	BytesProcessed     int64   `json:"bytes_processed,omitempty" example:"1048576"`
+	ExecutionTimeMs    float64 `json:"execution_time_ms" example:"234.5"`
+	CacheHit           bool    `json:"cache_hit,omitempty" example:"false"`
+	PartitionsAccessed int     `json:"partitions_accessed,omitempty" example:"3"`
+}
+
+// PaginationInfo represents pagination metadata
+type PaginationInfo struct {
+	Page         int   `json:"page" example:"1"`
+	PageSize     int   `json:"page_size" example:"100"`
+	TotalPages   int   `json:"total_pages" example:"10"`
+	TotalRows    int64 `json:"total_rows" example:"1000"`
+	HasNext      bool  `json:"has_next" example:"true"`
+	HasPrevious  bool  `json:"has_previous" example:"false"`
+	NextPage     *int  `json:"next_page,omitempty" swaggertype:"integer" example:"2"`
+	PreviousPage *int  `json:"previous_page,omitempty" swaggertype:"integer"`
+}
+
+// QueryResponse represents the enhanced response for a query request
 type QueryResponse struct {
-	QueryID       string                   `json:"query_id" example:"550e8400-e29b-41d4-a716-446655440000"`
-	Prompt        string                   `json:"prompt" example:"Show me the top 10 users by total purchase amount"`
-	GeneratedSQL  string                   `json:"generated_sql" example:"SELECT user_id, SUM(amount) as total FROM purchases WHERE date >= today() - 30 GROUP BY user_id ORDER BY total DESC LIMIT 10"`
-	Results       []map[string]interface{} `json:"results" swaggertype:"array,object"`
-	RowCount      int                      `json:"row_count" example:"10"`
-	ExecutionTime float64                  `json:"execution_time" example:"0.234"`
-	Timestamp     time.Time                `json:"timestamp" example:"2023-01-01T00:00:00Z"`
+	QueryID      string                   `json:"query_id" example:"550e8400-e29b-41d4-a716-446655440000"`
+	Prompt       string                   `json:"prompt" example:"Show me the top 10 users by total purchase amount"`
+	GeneratedSQL string                   `json:"generated_sql" example:"SELECT user_id, SUM(amount) as total FROM purchases WHERE date >= today() - 30 GROUP BY user_id ORDER BY total DESC LIMIT 10"`
+	Results      []map[string]interface{} `json:"results" swaggertype:"array,object"`
+	// New fields for column metadata and pagination
+	Columns    []ColumnMetadata `json:"columns,omitempty"`
+	Statistics *QueryStatistics `json:"statistics,omitempty"`
+	Pagination *PaginationInfo  `json:"pagination,omitempty"`
+	// Legacy fields (kept for backward compatibility)
+	RowCount      int       `json:"row_count" example:"10"`
+	ExecutionTime float64   `json:"execution_time" example:"0.234"`
+	Timestamp     time.Time `json:"timestamp" example:"2023-01-01T00:00:00Z"`
+	// Additional metadata
+	Warnings []string `json:"warnings,omitempty" example:"['Query processed large amount of data']"`
+	CacheKey string   `json:"cache_key,omitempty"`
 }
 
 // SchemaInfo represents database schema information
@@ -35,6 +81,11 @@ type TableSchema struct {
 	RowCount    uint64         `json:"row_count" example:"1000000"`
 	Columns     []ColumnSchema `json:"columns"`
 	Description string         `json:"description,omitempty" example:"User information table"`
+	// New fields
+	PartitionKey string     `json:"partition_key,omitempty" example:"toYYYYMM(created_at)"`
+	SortingKey   string     `json:"sorting_key,omitempty" example:"user_id"`
+	SizeBytes    int64      `json:"size_bytes,omitempty" example:"104857600"`
+	LastModified *time.Time `json:"last_modified,omitempty"`
 }
 
 // ColumnSchema represents a column's schema
@@ -43,6 +94,11 @@ type ColumnSchema struct {
 	Type        string `json:"type" example:"UInt64"`
 	Description string `json:"description,omitempty" example:"Unique user identifier"`
 	IsNullable  bool   `json:"is_nullable" example:"false"`
+	// New fields
+	DefaultValue   string `json:"default_value,omitempty"`
+	IsPrimaryKey   bool   `json:"is_primary_key,omitempty" example:"true"`
+	IsSortingKey   bool   `json:"is_sorting_key,omitempty" example:"true"`
+	IsPartitionKey bool   `json:"is_partition_key,omitempty" example:"false"`
 }
 
 // ErrorResponse represents error responses
@@ -97,4 +153,8 @@ type QueryValidationResult struct {
 	Operations []string `json:"operations,omitempty"`
 	Tables     []string `json:"tables,omitempty"`
 	Columns    []string `json:"columns,omitempty"`
+	// New fields
+	EstimatedRows int64    `json:"estimated_rows,omitempty" example:"10000"`
+	EstimatedCost string   `json:"estimated_cost,omitempty" example:"low"`
+	Optimizations []string `json:"optimizations,omitempty"`
 }

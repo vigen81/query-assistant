@@ -1,0 +1,848 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "description": "An intelligent query assistant that uses ChatGPT to generate and execute ClickHouse queries based on natural language prompts.\n\n## Features\n- **Natural Language Processing**: Convert plain English prompts to ClickHouse SQL queries\n- **Schema-Aware**: Understands your database schema for accurate query generation\n- **Query Execution**: Automatically executes generated queries with timeout protection\n- **Secure**: Query validation and execution limits\n- **Observable**: Structured logging with Graylog integration\n\n## How it works\n1. User submits a natural language prompt about their data\n2. System sends the prompt along with schema information to ChatGPT\n3. ChatGPT generates an appropriate ClickHouse query\n4. System validates and executes the query with timeout protection\n5. Results are formatted and returned to the user",
+        "title": "Query Assistant API",
+        "termsOfService": "http://swagger.io/terms/",
+        "contact": {},
+        "version": "1.0"
+    },
+    "host": "localhost:8080",
+    "basePath": "/api/v1",
+    "paths": {
+        "/health": {
+            "get": {
+                "description": "Returns the general health status of the query assistant service",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "health"
+                ],
+                "summary": "Health check",
+                "responses": {
+                    "200": {
+                        "description": "Service is healthy",
+                        "schema": {
+                            "$ref": "#/definitions/models.HealthResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/live": {
+            "get": {
+                "description": "Returns the liveness status of the query assistant",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "health"
+                ],
+                "summary": "Liveness check",
+                "responses": {
+                    "200": {
+                        "description": "Service is alive",
+                        "schema": {
+                            "$ref": "#/definitions/models.HealthResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/query/execute": {
+            "post": {
+                "description": "Convert a natural language prompt to SQL and execute it against ClickHouse with optional pagination and column metadata",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "query"
+                ],
+                "summary": "Execute a natural language query",
+                "parameters": [
+                    {
+                        "description": "Query request with optional pagination",
+                        "name": "query",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.QueryRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful query execution with results, column metadata, and pagination info",
+                        "schema": {
+                            "$ref": "#/definitions/models.QueryResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "408": {
+                        "description": "Query timeout",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/query/generate": {
+            "post": {
+                "description": "Generate a SQL query from natural language prompt without executing it",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "query"
+                ],
+                "summary": "Generate SQL query",
+                "parameters": [
+                    {
+                        "description": "Generation request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Generated SQL query with metadata",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/query/history": {
+            "get": {
+                "description": "Retrieve the history of previously executed queries with pagination",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "query"
+                ],
+                "summary": "Get query history",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "Page number",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 50,
+                        "description": "Page size",
+                        "name": "page_size",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by user ID",
+                        "name": "user_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "List of historical queries",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/models.QueryHistory"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/query/validate": {
+            "post": {
+                "description": "Validate a SQL query for syntax and security without executing it, with optimization suggestions",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "query"
+                ],
+                "summary": "Validate a SQL query",
+                "parameters": [
+                    {
+                        "description": "Query to validate",
+                        "name": "query",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Validation result with warnings and optimization suggestions",
+                        "schema": {
+                            "$ref": "#/definitions/models.QueryValidationResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/ready": {
+            "get": {
+                "description": "Returns the readiness status of the query assistant including dependency checks",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "health"
+                ],
+                "summary": "Readiness check",
+                "responses": {
+                    "200": {
+                        "description": "Service is ready to accept requests",
+                        "schema": {
+                            "$ref": "#/definitions/models.HealthResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service is not ready - dependencies not available",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/schema": {
+            "get": {
+                "description": "Get the complete database schema including all tables and columns",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "schema"
+                ],
+                "summary": "Get database schema",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.SchemaInfo"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/schema/refresh": {
+            "post": {
+                "description": "Manually refresh the database schema cache",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "schema"
+                ],
+                "summary": "Refresh schema cache",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/schema/table/{table}": {
+            "get": {
+                "description": "Get schema information for a specific table",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "schema"
+                ],
+                "summary": "Get table schema",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Table name",
+                        "name": "table",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.TableSchema"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "models.ColumnMetadata": {
+            "type": "object",
+            "properties": {
+                "database_type": {
+                    "type": "string",
+                    "example": "UInt64"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "user_id"
+                },
+                "nullable": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "position": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "sample_value": {
+                    "type": "string",
+                    "example": "12345"
+                },
+                "type": {
+                    "type": "string",
+                    "example": "UInt64"
+                }
+            }
+        },
+        "models.ColumnSchema": {
+            "type": "object",
+            "properties": {
+                "default_value": {
+                    "description": "New fields",
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string",
+                    "example": "Unique user identifier"
+                },
+                "is_nullable": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "is_partition_key": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "is_primary_key": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "is_sorting_key": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "name": {
+                    "type": "string",
+                    "example": "user_id"
+                },
+                "type": {
+                    "type": "string",
+                    "example": "UInt64"
+                }
+            }
+        },
+        "models.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "example": "VALIDATION_ERROR"
+                },
+                "details": {
+                    "type": "object"
+                },
+                "error": {
+                    "type": "string",
+                    "example": "Query validation failed"
+                },
+                "message": {
+                    "type": "string",
+                    "example": "Query contains forbidden operation: DROP"
+                },
+                "query_id": {
+                    "type": "string",
+                    "example": "550e8400-e29b-41d4-a716-446655440000"
+                },
+                "timestamp": {
+                    "type": "string",
+                    "example": "2023-01-01T00:00:00Z"
+                }
+            }
+        },
+        "models.HealthCheckDetail": {
+            "type": "object",
+            "properties": {
+                "clickhouse": {
+                    "type": "string",
+                    "example": "ok"
+                },
+                "openai": {
+                    "type": "string",
+                    "example": "ok"
+                }
+            }
+        },
+        "models.HealthResponse": {
+            "type": "object",
+            "properties": {
+                "checks": {
+                    "$ref": "#/definitions/models.HealthCheckDetail"
+                },
+                "service": {
+                    "type": "string",
+                    "example": "query-assistant"
+                },
+                "status": {
+                    "type": "string",
+                    "example": "ok"
+                },
+                "timestamp": {
+                    "type": "string",
+                    "example": "2023-01-01T00:00:00Z"
+                },
+                "version": {
+                    "type": "string",
+                    "example": "1.0.0"
+                }
+            }
+        },
+        "models.PaginationInfo": {
+            "type": "object",
+            "properties": {
+                "has_next": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "has_previous": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "next_page": {
+                    "type": "integer",
+                    "example": 2
+                },
+                "page": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "page_size": {
+                    "type": "integer",
+                    "example": 100
+                },
+                "previous_page": {
+                    "type": "integer"
+                },
+                "total_pages": {
+                    "type": "integer",
+                    "example": 10
+                },
+                "total_rows": {
+                    "type": "integer",
+                    "example": 1000
+                }
+            }
+        },
+        "models.QueryHistory": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string",
+                    "example": "2023-01-01T00:00:00Z"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "execution_time": {
+                    "type": "number",
+                    "example": 0.156
+                },
+                "generated_sql": {
+                    "type": "string",
+                    "example": "SELECT month, SUM(sales) FROM sales_table GROUP BY month"
+                },
+                "prompt": {
+                    "type": "string",
+                    "example": "Show total sales by month"
+                },
+                "query_id": {
+                    "type": "string",
+                    "example": "550e8400-e29b-41d4-a716-446655440000"
+                },
+                "row_count": {
+                    "type": "integer",
+                    "example": 12
+                },
+                "status": {
+                    "type": "string",
+                    "example": "success"
+                },
+                "user_id": {
+                    "type": "string",
+                    "example": "user123"
+                }
+            }
+        },
+        "models.QueryRequest": {
+            "type": "object",
+            "properties": {
+                "context": {
+                    "type": "object"
+                },
+                "include_schema": {
+                    "description": "Response options",
+                    "type": "boolean",
+                    "example": true
+                },
+                "include_stats": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "page": {
+                    "description": "Pagination options",
+                    "type": "integer",
+                    "minimum": 1,
+                    "example": 1
+                },
+                "page_size": {
+                    "type": "integer",
+                    "maximum": 10000,
+                    "minimum": 1,
+                    "example": 100
+                },
+                "prompt": {
+                    "type": "string",
+                    "example": "Show me the top 10 users by total purchase amount in the last 30 days"
+                },
+                "timeout": {
+                    "type": "integer",
+                    "maximum": 300,
+                    "minimum": 1,
+                    "example": 30
+                }
+            }
+        },
+        "models.QueryResponse": {
+            "type": "object",
+            "properties": {
+                "cache_key": {
+                    "type": "string"
+                },
+                "columns": {
+                    "description": "New fields for column metadata and pagination",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.ColumnMetadata"
+                    }
+                },
+                "execution_time": {
+                    "type": "number",
+                    "example": 0.234
+                },
+                "generated_sql": {
+                    "type": "string",
+                    "example": "SELECT user_id, SUM(amount) as total FROM purchases WHERE date \u003e= today() - 30 GROUP BY user_id ORDER BY total DESC LIMIT 10"
+                },
+                "pagination": {
+                    "$ref": "#/definitions/models.PaginationInfo"
+                },
+                "prompt": {
+                    "type": "string",
+                    "example": "Show me the top 10 users by total purchase amount"
+                },
+                "query_id": {
+                    "type": "string",
+                    "example": "550e8400-e29b-41d4-a716-446655440000"
+                },
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "type": "object"
+                    }
+                },
+                "row_count": {
+                    "description": "Legacy fields (kept for backward compatibility)",
+                    "type": "integer",
+                    "example": 10
+                },
+                "statistics": {
+                    "$ref": "#/definitions/models.QueryStatistics"
+                },
+                "timestamp": {
+                    "type": "string",
+                    "example": "2023-01-01T00:00:00Z"
+                },
+                "warnings": {
+                    "description": "Additional metadata",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "['Query processed large amount of data']"
+                    ]
+                }
+            }
+        },
+        "models.QueryStatistics": {
+            "type": "object",
+            "properties": {
+                "bytes_processed": {
+                    "type": "integer",
+                    "example": 1048576
+                },
+                "cache_hit": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "execution_time_ms": {
+                    "type": "number",
+                    "example": 234.5
+                },
+                "partitions_accessed": {
+                    "type": "integer",
+                    "example": 3
+                },
+                "rows_returned": {
+                    "type": "integer",
+                    "example": 100
+                },
+                "total_rows": {
+                    "type": "integer",
+                    "example": 50000
+                }
+            }
+        },
+        "models.QueryValidationResult": {
+            "type": "object",
+            "properties": {
+                "columns": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "errors": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "estimated_cost": {
+                    "type": "string",
+                    "example": "low"
+                },
+                "estimated_rows": {
+                    "description": "New fields",
+                    "type": "integer",
+                    "example": 10000
+                },
+                "operations": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "optimizations": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "tables": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "valid": {
+                    "type": "boolean"
+                },
+                "warnings": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "models.SchemaInfo": {
+            "type": "object",
+            "properties": {
+                "database": {
+                    "type": "string",
+                    "example": "analytics"
+                },
+                "tables": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.TableSchema"
+                    }
+                }
+            }
+        },
+        "models.TableSchema": {
+            "type": "object",
+            "properties": {
+                "columns": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.ColumnSchema"
+                    }
+                },
+                "description": {
+                    "type": "string",
+                    "example": "User information table"
+                },
+                "engine": {
+                    "type": "string",
+                    "example": "MergeTree"
+                },
+                "last_modified": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "users"
+                },
+                "partition_key": {
+                    "description": "New fields",
+                    "type": "string",
+                    "example": "toYYYYMM(created_at)"
+                },
+                "row_count": {
+                    "type": "integer",
+                    "example": 1000000
+                },
+                "size_bytes": {
+                    "type": "integer",
+                    "example": 104857600
+                },
+                "sorting_key": {
+                    "type": "string",
+                    "example": "user_id"
+                }
+            }
+        }
+    },
+    "tags": [
+        {
+            "description": "Query generation and execution operations",
+            "name": "query"
+        },
+        {
+            "description": "Database schema information",
+            "name": "schema"
+        },
+        {
+            "description": "Health and readiness checks",
+            "name": "health"
+        }
+    ]
+}

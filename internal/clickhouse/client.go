@@ -20,6 +20,20 @@ type Client struct {
 }
 
 func NewClient(cfg *config.Config, logger *logrus.Logger) (*Client, error) {
+	// Set default values if not specified
+	maxOpenConns := cfg.ClickHouse.MaxOpenConns
+	if maxOpenConns <= 0 {
+		maxOpenConns = 10
+	}
+	maxIdleConns := cfg.ClickHouse.MaxIdleConns
+	if maxIdleConns <= 0 {
+		maxIdleConns = 5
+	}
+	connMaxLifetime := cfg.ClickHouse.ConnMaxLifetime
+	if connMaxLifetime <= 0 {
+		connMaxLifetime = 300
+	}
+
 	// ClickHouse connection options
 	options := &clickhouse.Options{
 		Addr: []string{fmt.Sprintf("%s:%s", cfg.ClickHouse.Host, cfg.ClickHouse.Port)},
@@ -35,9 +49,6 @@ func NewClient(cfg *config.Config, logger *logrus.Logger) (*Client, error) {
 		Settings: clickhouse.Settings{
 			"max_execution_time": 60,
 		},
-		MaxOpenConns:    cfg.ClickHouse.MaxOpenConns,
-		MaxIdleConns:    cfg.ClickHouse.MaxIdleConns,
-		ConnMaxLifetime: time.Duration(cfg.ClickHouse.ConnMaxLifetime) * time.Second,
 	}
 
 	// Create native connection
@@ -55,30 +66,46 @@ func NewClient(cfg *config.Config, logger *logrus.Logger) (*Client, error) {
 	}
 
 	// Create standard SQL DB for queries
-	db := clickhouse.OpenDB(options)
+	// IMPORTANT: We need to create a new options struct for the SQL connection
+	sqlOptions := &clickhouse.Options{
+		Addr: []string{fmt.Sprintf("%s:%s", cfg.ClickHouse.Host, cfg.ClickHouse.Port)},
+		Auth: clickhouse.Auth{
+			Database: cfg.ClickHouse.Database,
+			Username: cfg.ClickHouse.Username,
+			Password: cfg.ClickHouse.Password,
+		},
+		DialTimeout: 5 * time.Second,
+		Compression: &clickhouse.Compression{
+			Method: clickhouse.CompressionLZ4,
+		},
+		Settings: clickhouse.Settings{
+			"max_execution_time": 60,
+		},
+	}
 
-	// Set connection pool parameters (with defaults if not specified)
-	maxOpenConns := cfg.ClickHouse.MaxOpenConns
-	if maxOpenConns <= 0 {
-		maxOpenConns = 10
-	}
-	maxIdleConns := cfg.ClickHouse.MaxIdleConns
-	if maxIdleConns <= 0 {
-		maxIdleConns = 5
-	}
-	connMaxLifetime := cfg.ClickHouse.ConnMaxLifetime
-	if connMaxLifetime <= 0 {
-		connMaxLifetime = 300
-	}
+	// Open SQL database connection
+	db := clickhouse.OpenDB(sqlOptions)
 
+	// IMPORTANT: Set connection pool parameters BEFORE using the connection
 	db.SetMaxOpenConns(maxOpenConns)
 	db.SetMaxIdleConns(maxIdleConns)
 	db.SetConnMaxLifetime(time.Duration(connMaxLifetime) * time.Second)
 
-	// Don't test SQL connection during initialization - it seems to cause issues
-	// The connection will be tested when first used
+	// Test the SQL connection with a simple ping
+	// This is important to ensure the connection pool is properly initialized
+	if err := db.Ping(); err != nil {
+		// If ping fails, it might be a transient issue, log but don't fail
+		logger.WithError(err).Warn("Initial SQL DB ping failed, will retry on first use")
+	}
 
-	logger.Info("ClickHouse connection established")
+	logger.WithFields(logrus.Fields{
+		"host":              cfg.ClickHouse.Host,
+		"port":              cfg.ClickHouse.Port,
+		"database":          cfg.ClickHouse.Database,
+		"max_open_conns":    maxOpenConns,
+		"max_idle_conns":    maxIdleConns,
+		"conn_max_lifetime": connMaxLifetime,
+	}).Info("ClickHouse connection established")
 
 	return &Client{
 		conn:   conn,

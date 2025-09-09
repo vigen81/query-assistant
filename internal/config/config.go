@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"gitlab.smartbet.am/golang/query-assistant/internal/plugin/ams"
@@ -32,7 +31,7 @@ const mockConfig = `{
 	},
 	"openai": {
 		"api_key": "",
-		"model": "gpt-3.5-turbo",
+		"model": "gpt-4o",
 		"max_tokens": 2000,
 		"temperature": 0.1,
 		"timeout": "30s"
@@ -53,10 +52,6 @@ const mockConfig = `{
 	"logging": {
 		"graylog_addr": "gelf-udp-service:12222",
 		"service_name": "query-assistant"
-	},
-	"auth": {
-		"jwt_secret": "your-secret-key",
-		"skip_auth": false
 	}
 }`
 
@@ -67,7 +62,6 @@ type Config struct {
 	Query      QueryConfig      `json:"query"`
 	Swagger    SwaggerConfig    `json:"swagger"`
 	Logging    LoggingConfig    `json:"logging"`
-	Auth       AuthConfig       `json:"auth"`
 }
 
 type ServerConfig struct {
@@ -115,11 +109,6 @@ type SwaggerConfig struct {
 type LoggingConfig struct {
 	GraylogAddr string `json:"graylog_addr"`
 	ServiceName string `json:"service_name"`
-}
-
-type AuthConfig struct {
-	JWTSecret string `json:"jwt_secret"`
-	SkipAuth  bool   `json:"skip_auth"`
 }
 
 // Helper methods to parse duration strings
@@ -216,11 +205,8 @@ func (c *Config) overrideWithEnv() {
 	if graylogAddr := os.Getenv("GRAYLOG_ADDR"); graylogAddr != "" {
 		c.Logging.GraylogAddr = graylogAddr
 	}
-	if jwtSecret := os.Getenv("JWT_SECRET"); jwtSecret != "" {
-		c.Auth.JWTSecret = jwtSecret
-	}
-	if skipAuth := os.Getenv("SKIP_AUTH"); strings.ToLower(skipAuth) == "true" {
-		c.Auth.SkipAuth = true
+	if openaiModel := os.Getenv("OPENAI_MODEL"); openaiModel != "" {
+		c.OpenAI.Model = openaiModel
 	}
 }
 
