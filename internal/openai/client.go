@@ -63,7 +63,7 @@ IMPORTANT RULES:
 5. Use proper ClickHouse functions and syntax
 6. Add LIMIT clause (default to 100 rows if not specified)
 7. The query must be ready to execute as-is
-8. ignore _peerdb_* fields AT all
+8. ignore _peerdb_synced_at  _peerdb_is_deleted  _peerdb_version fields AT all
 9. use final for rmt table
 10. add created_at range to tables if possible
 11. always add created_at on table bh_transaction_main_archive and bh_payment_archive 
