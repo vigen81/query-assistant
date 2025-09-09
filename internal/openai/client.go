@@ -63,6 +63,7 @@ IMPORTANT RULES:
 5. Use proper ClickHouse functions and syntax
 6. Add LIMIT clause (default to 100 rows if not specified)
 7. The query must be ready to execute as-is
+8. ignore _peerdb_* fields AT all
 
 Example format:
 SELECT column1, column2 FROM table WHERE condition LIMIT 100`, prompt)

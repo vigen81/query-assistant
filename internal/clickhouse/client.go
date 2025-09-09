@@ -85,6 +85,11 @@ func NewClient(cfg *config.Config, logger *logrus.Logger) (*Client, error) {
 		Settings: clickhouse.Settings{
 			"max_execution_time": 60,
 		},
+		TLS:   &tls.Config{},
+		Debug: true,
+		Debugf: func(format string, v ...interface{}) {
+			fmt.Printf(format, v)
+		},
 	}
 
 	// Open SQL database connection
