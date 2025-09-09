@@ -66,6 +66,7 @@ IMPORTANT RULES:
 8. ignore _peerdb_* fields AT all
 9. use final for rmt table
 10. add created_at range to tables if possible
+11. always add created_at on table bh_transaction_main_archive and bh_payment_archive 
 
 Example format:
 SELECT column1, column2 FROM table WHERE condition LIMIT 100`, prompt)
