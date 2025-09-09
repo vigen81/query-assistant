@@ -2,6 +2,7 @@ package clickhouse
 
 import (
 	"context"
+	"crypto/tls"
 	"database/sql"
 	"fmt"
 	"time"
@@ -48,6 +49,9 @@ func NewClient(cfg *config.Config, logger *logrus.Logger) (*Client, error) {
 		},
 		Settings: clickhouse.Settings{
 			"max_execution_time": 60,
+		},
+		TLS: &tls.Config{
+			InsecureSkipVerify: false,
 		},
 	}
 
