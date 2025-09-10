@@ -120,6 +120,38 @@ definitions:
         example: 1000
         type: integer
     type: object
+  models.QueryGenerateRequest:
+    properties:
+      prompt:
+        example: Show GGR for last month
+        type: string
+      site_id:
+        example: 123
+        minimum: 1
+        type: integer
+    required:
+    - prompt
+    - site_id
+    type: object
+  models.QueryGenerateResponse:
+    properties:
+      complexity:
+        example: medium
+        type: string
+      generated_sql:
+        example: SELECT SUM(bet_amount) - SUM(win_amount) as GGR FROM transactions
+          WHERE site_id = 123 AND created_at >= today() - 30 LIMIT 1
+        type: string
+      prompt:
+        example: Show GGR for last month
+        type: string
+      site_id:
+        example: 123
+        type: integer
+      timestamp:
+        example: "2023-01-01T00:00:00Z"
+        type: string
+    type: object
   models.QueryHistory:
     properties:
       created_at:
@@ -131,7 +163,8 @@ definitions:
         example: 0.156
         type: number
       generated_sql:
-        example: SELECT month, SUM(sales) FROM sales_table GROUP BY month
+        example: SELECT month, SUM(sales) FROM sales_table WHERE site_id = 123 GROUP
+          BY month
         type: string
       prompt:
         example: Show total sales by month
@@ -141,6 +174,9 @@ definitions:
         type: string
       row_count:
         example: 12
+        type: integer
+      site_id:
+        example: 123
         type: integer
       status:
         example: success
@@ -174,11 +210,18 @@ definitions:
         example: Show me the top 10 users by total purchase amount in the last 30
           days
         type: string
+      site_id:
+        description: Required site_id parameter (numeric)
+        example: 123
+        minimum: 1
+        type: integer
       timeout:
         example: 30
         maximum: 300
         minimum: 1
         type: integer
+    required:
+    - site_id
     type: object
   models.QueryResponse:
     properties:
@@ -193,8 +236,9 @@ definitions:
         example: 0.234
         type: number
       generated_sql:
-        example: SELECT user_id, SUM(amount) as total FROM purchases WHERE date >=
-          today() - 30 GROUP BY user_id ORDER BY total DESC LIMIT 10
+        example: SELECT user_id, SUM(amount) as total FROM purchases WHERE site_id
+          = 123 AND created_at >= today() - 30 GROUP BY user_id ORDER BY total DESC
+          LIMIT 10
         type: string
       pagination:
         $ref: '#/definitions/models.PaginationInfo'
@@ -245,6 +289,19 @@ definitions:
       total_rows:
         example: 50000
         type: integer
+    type: object
+  models.QueryValidateRequest:
+    properties:
+      query:
+        example: SELECT * FROM users WHERE site_id = 123 LIMIT 10
+        type: string
+      site_id:
+        example: 123
+        minimum: 1
+        type: integer
+    required:
+    - query
+    - site_id
     type: object
   models.QueryValidationResult:
     properties:
@@ -325,23 +382,34 @@ definitions:
     type: object
 host: localhost:8080
 info:
-  contact: {}
+  contact:
+    email: support@yourcompany.com
+    name: API Support
   description: |-
-    An intelligent query assistant that uses ChatGPT to generate and execute ClickHouse queries based on natural language prompts.
+    An intelligent query assistant that uses ChatGPT to generate and execute ClickHouse queries based on natural language prompts with multi-tenant support.
 
     ## Features
     - **Natural Language Processing**: Convert plain English prompts to ClickHouse SQL queries
+    - **Multi-Tenant Support**: All queries are filtered by site_id for data isolation
     - **Schema-Aware**: Understands your database schema for accurate query generation
+    - **Business Logic**: Built-in understanding of gaming metrics (GGR = Bet - Win)
     - **Query Execution**: Automatically executes generated queries with timeout protection
-    - **Secure**: Query validation and execution limits
+    - **Secure**: Query validation, site_id enforcement, and execution limits
     - **Observable**: Structured logging with Graylog integration
 
-    ## How it works
-    1. User submits a natural language prompt about their data
-    2. System sends the prompt along with schema information to ChatGPT
-    3. ChatGPT generates an appropriate ClickHouse query
-    4. System validates and executes the query with timeout protection
-    5. Results are formatted and returned to the user
+    ## Important Business Rules
+    - **GGR Calculation**: Gross Gaming Revenue is always calculated as Total Bet - Total Win
+    - **Site Isolation**: All queries are automatically filtered by site_id
+    - **Archive Tables**: Queries on archive tables always include created_at filters
+    - **RMT Tables**: Tables with 'rmt' in name use FINAL keyword for consistency
+
+    ## Multi-Tenant Architecture
+    All API endpoints require a numeric site_id parameter to ensure data isolation between different sites/tenants.
+    The system automatically adds WHERE site_id = {your_site_id} to all generated queries.
+
+    ## Authentication
+    Most endpoints require a Bearer token in the Authorization header:
+    Authorization: Bearer {your-jwt-token}
   termsOfService: http://swagger.io/terms/
   title: Query Assistant API
   version: "1.0"
@@ -377,9 +445,14 @@ paths:
       consumes:
       - application/json
       description: Convert a natural language prompt to SQL and execute it against
-        ClickHouse with optional pagination and column metadata
+        ClickHouse with site_id filtering for multi-tenancy
       parameters:
-      - description: Query request with optional pagination
+      - description: Bearer token
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      - description: Query request with required site_id for multi-tenant filtering
         in: body
         name: query
         required: true
@@ -389,12 +462,15 @@ paths:
       - application/json
       responses:
         "200":
-          description: Successful query execution with results, column metadata, and
-            pagination info
+          description: Successful query execution with results filtered by site_id
           schema:
             $ref: '#/definitions/models.QueryResponse'
         "400":
-          description: Invalid request
+          description: Invalid request - missing site_id or invalid format
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "401":
+          description: Unauthorized - invalid or missing token
           schema:
             $ref: '#/definitions/models.ErrorResponse'
         "408":
@@ -405,7 +481,9 @@ paths:
           description: Internal server error
           schema:
             $ref: '#/definitions/models.ErrorResponse'
-      summary: Execute a natural language query
+      security:
+      - ApiKeyAuth: []
+      summary: Execute a natural language query with site filtering
       tags:
       - query
   /query/generate:
@@ -415,30 +493,38 @@ paths:
       description: Generate a SQL query from natural language prompt without executing
         it
       parameters:
-      - description: Generation request
+      - description: Bearer token
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      - description: Generation request with site_id
         in: body
         name: request
         required: true
         schema:
-          additionalProperties:
-            type: string
-          type: object
+          $ref: '#/definitions/models.QueryGenerateRequest'
       produces:
       - application/json
       responses:
         "200":
           description: Generated SQL query with metadata
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/models.QueryGenerateResponse'
         "400":
           description: Invalid request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "401":
+          description: Unauthorized
           schema:
             $ref: '#/definitions/models.ErrorResponse'
         "500":
           description: Internal server error
           schema:
             $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
       summary: Generate SQL query
       tags:
       - query
@@ -446,6 +532,11 @@ paths:
     get:
       description: Retrieve the history of previously executed queries with pagination
       parameters:
+      - description: Bearer token
+        in: header
+        name: Authorization
+        required: true
+        type: string
       - default: 1
         description: Page number
         in: query
@@ -460,6 +551,10 @@ paths:
         in: query
         name: user_id
         type: string
+      - description: Filter by site ID
+        in: query
+        name: site_id
+        type: integer
       produces:
       - application/json
       responses:
@@ -469,10 +564,16 @@ paths:
             items:
               $ref: '#/definitions/models.QueryHistory'
             type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
         "500":
           description: Internal server error
           schema:
             $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
       summary: Get query history
       tags:
       - query
@@ -483,14 +584,17 @@ paths:
       description: Validate a SQL query for syntax and security without executing
         it, with optimization suggestions
       parameters:
-      - description: Query to validate
+      - description: Bearer token
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      - description: Query to validate with site_id
         in: body
         name: query
         required: true
         schema:
-          additionalProperties:
-            type: string
-          type: object
+          $ref: '#/definitions/models.QueryValidateRequest'
       produces:
       - application/json
       responses:
@@ -502,10 +606,16 @@ paths:
           description: Invalid request
           schema:
             $ref: '#/definitions/models.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
         "500":
           description: Internal server error
           schema:
             $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
       summary: Validate a SQL query
       tags:
       - query
@@ -594,9 +704,14 @@ paths:
       summary: Get table schema
       tags:
       - schema
+securityDefinitions:
+  ApiKeyAuth:
+    in: header
+    name: Authorization
+    type: apiKey
 swagger: "2.0"
 tags:
-- description: Query generation and execution operations
+- description: Query generation and execution operations with multi-tenant support
   name: query
 - description: Database schema information
   name: schema

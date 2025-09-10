@@ -21,29 +21,45 @@ import (
 
 // @title Query Assistant API
 // @version 1.0
-// @description An intelligent query assistant that uses ChatGPT to generate and execute ClickHouse queries based on natural language prompts.
+// @description An intelligent query assistant that uses ChatGPT to generate and execute ClickHouse queries based on natural language prompts with multi-tenant support.
 // @description
 // @description ## Features
 // @description - **Natural Language Processing**: Convert plain English prompts to ClickHouse SQL queries
+// @description - **Multi-Tenant Support**: All queries are filtered by site_id for data isolation
 // @description - **Schema-Aware**: Understands your database schema for accurate query generation
+// @description - **Business Logic**: Built-in understanding of gaming metrics (GGR = Bet - Win)
 // @description - **Query Execution**: Automatically executes generated queries with timeout protection
-// @description - **Secure**: Query validation and execution limits
+// @description - **Secure**: Query validation, site_id enforcement, and execution limits
 // @description - **Observable**: Structured logging with Graylog integration
 // @description
-// @description ## How it works
-// @description 1. User submits a natural language prompt about their data
-// @description 2. System sends the prompt along with schema information to ChatGPT
-// @description 3. ChatGPT generates an appropriate ClickHouse query
-// @description 4. System validates and executes the query with timeout protection
-// @description 5. Results are formatted and returned to the user
+// @description ## Important Business Rules
+// @description - **GGR Calculation**: Gross Gaming Revenue is always calculated as Total Bet - Total Win
+// @description - **Site Isolation**: All queries are automatically filtered by site_id
+// @description - **Archive Tables**: Queries on archive tables always include created_at filters
+// @description - **RMT Tables**: Tables with 'rmt' in name use FINAL keyword for consistency
+// @description
+// @description ## Multi-Tenant Architecture
+// @description All API endpoints require a numeric site_id parameter to ensure data isolation between different sites/tenants.
+// @description The system automatically adds WHERE site_id = {your_site_id} to all generated queries.
+// @description
+// @description ## Authentication
+// @description Most endpoints require a Bearer token in the Authorization header:
+// @description Authorization: Bearer {your-jwt-token}
 
 // @termsOfService http://swagger.io/terms/
+
+// @contact.name API Support
+// @contact.email support@yourcompany.com
 
 // @host localhost:8080
 // @BasePath /api/v1
 
+// @securityDefinitions.apikey ApiKeyAuth
+// @in header
+// @name Authorization
+
 // @tag.name query
-// @tag.description Query generation and execution operations
+// @tag.description Query generation and execution operations with multi-tenant support
 
 // @tag.name schema
 // @tag.description Database schema information

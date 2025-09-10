@@ -23,17 +23,20 @@ func NewQueryHandler(queryService *services.QueryService, logger *logrus.Logger)
 	}
 }
 
-// ExecuteQuery handles natural language query requests with pagination and metadata
-// @Summary Execute a natural language query
-// @Description Convert a natural language prompt to SQL and execute it against ClickHouse with optional pagination and column metadata
+// ExecuteQuery handles natural language query requests with multi-tenant filtering
+// @Summary Execute a natural language query with site filtering
+// @Description Convert a natural language prompt to SQL and execute it against ClickHouse with site_id filtering for multi-tenancy
 // @Tags query
 // @Accept json
 // @Produce json
-// @Param query body models.QueryRequest true "Query request with optional pagination"
-// @Success 200 {object} models.QueryResponse "Successful query execution with results, column metadata, and pagination info"
-// @Failure 400 {object} models.ErrorResponse "Invalid request"
+// @Param Authorization header string true "Bearer token"
+// @Param query body models.QueryRequest true "Query request with required site_id for multi-tenant filtering"
+// @Success 200 {object} models.QueryResponse "Successful query execution with results filtered by site_id"
+// @Failure 400 {object} models.ErrorResponse "Invalid request - missing site_id or invalid format"
+// @Failure 401 {object} models.ErrorResponse "Unauthorized - invalid or missing token"
 // @Failure 408 {object} models.ErrorResponse "Query timeout"
 // @Failure 500 {object} models.ErrorResponse "Internal server error"
+// @Security ApiKeyAuth
 // @Router /query/execute [post]
 func (h *QueryHandler) ExecuteQuery(c *fiber.Ctx) error {
 	var req models.QueryRequest
@@ -51,6 +54,15 @@ func (h *QueryHandler) ExecuteQuery(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(models.ErrorResponse{
 			Error:     "Prompt is required",
 			Code:      "MISSING_PROMPT",
+			Timestamp: time.Now(),
+		})
+	}
+
+	if req.SiteID == 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(models.ErrorResponse{
+			Error:     "Site ID is required",
+			Code:      "MISSING_SITE_ID",
+			Message:   "site_id parameter is required for multi-tenant filtering",
 			Timestamp: time.Now(),
 		})
 	}
@@ -81,6 +93,7 @@ func (h *QueryHandler) ExecuteQuery(c *fiber.Ctx) error {
 
 	h.logger.WithFields(logrus.Fields{
 		"prompt":         req.Prompt,
+		"site_id":        req.SiteID,
 		"page":           req.Page,
 		"page_size":      req.PageSize,
 		"include_schema": req.IncludeSchema,
@@ -90,7 +103,7 @@ func (h *QueryHandler) ExecuteQuery(c *fiber.Ctx) error {
 	// Process the query
 	response, err := h.queryService.ProcessQuery(c.Context(), &req)
 	if err != nil {
-		h.logger.WithError(err).WithField("prompt", req.Prompt).Error("Query processing failed")
+		h.logger.WithError(err).WithFields(logrus.Fields{"prompt": req.Prompt, "site_id": req.SiteID}).Error("Query processing failed")
 
 		// Determine appropriate error code
 		code := "QUERY_ERROR"
@@ -131,10 +144,13 @@ func (h *QueryHandler) ExecuteQuery(c *fiber.Ctx) error {
 // @Tags query
 // @Accept json
 // @Produce json
-// @Param query body map[string]string true "Query to validate" example({"query": "SELECT * FROM users LIMIT 10"})
+// @Param Authorization header string true "Bearer token"
+// @Param query body models.QueryValidateRequest true "Query to validate with site_id"
 // @Success 200 {object} models.QueryValidationResult "Validation result with warnings and optimization suggestions"
 // @Failure 400 {object} models.ErrorResponse "Invalid request"
+// @Failure 401 {object} models.ErrorResponse "Unauthorized"
 // @Failure 500 {object} models.ErrorResponse "Internal server error"
+// @Security ApiKeyAuth
 // @Router /query/validate [post]
 func (h *QueryHandler) ValidateQuery(c *fiber.Ctx) error {
 	var req struct {
@@ -177,10 +193,13 @@ func (h *QueryHandler) ValidateQuery(c *fiber.Ctx) error {
 // @Tags query
 // @Accept json
 // @Produce json
-// @Param request body map[string]string true "Generation request" example({"prompt": "Show me top 10 users by purchase amount"})
-// @Success 200 {object} map[string]interface{} "Generated SQL query with metadata"
+// @Param Authorization header string true "Bearer token"
+// @Param request body models.QueryGenerateRequest true "Generation request with site_id"
+// @Success 200 {object} models.QueryGenerateResponse "Generated SQL query with metadata"
 // @Failure 400 {object} models.ErrorResponse "Invalid request"
+// @Failure 401 {object} models.ErrorResponse "Unauthorized"
 // @Failure 500 {object} models.ErrorResponse "Internal server error"
+// @Security ApiKeyAuth
 // @Router /query/generate [post]
 func (h *QueryHandler) GenerateQuery(c *fiber.Ctx) error {
 	var req struct {
@@ -219,11 +238,15 @@ func (h *QueryHandler) GenerateQuery(c *fiber.Ctx) error {
 // @Description Retrieve the history of previously executed queries with pagination
 // @Tags query
 // @Produce json
+// @Param Authorization header string true "Bearer token"
 // @Param page query int false "Page number" default(1)
 // @Param page_size query int false "Page size" default(50)
 // @Param user_id query string false "Filter by user ID"
+// @Param site_id query int false "Filter by site ID"
 // @Success 200 {array} models.QueryHistory "List of historical queries"
+// @Failure 401 {object} models.ErrorResponse "Unauthorized"
 // @Failure 500 {object} models.ErrorResponse "Internal server error"
+// @Security ApiKeyAuth
 // @Router /query/history [get]
 func (h *QueryHandler) QueryHistory(c *fiber.Ctx) error {
 	// This would be implemented with a proper query history storage

@@ -10,7 +10,10 @@ const docTemplate = `{
         "description": "{{escape .Description}}",
         "title": "{{.Title}}",
         "termsOfService": "http://swagger.io/terms/",
-        "contact": {},
+        "contact": {
+            "name": "API Support",
+            "email": "support@yourcompany.com"
+        },
         "version": "{{.Version}}"
     },
     "host": "{{.Host}}",
@@ -58,7 +61,12 @@ const docTemplate = `{
         },
         "/query/execute": {
             "post": {
-                "description": "Convert a natural language prompt to SQL and execute it against ClickHouse with optional pagination and column metadata",
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Convert a natural language prompt to SQL and execute it against ClickHouse with site_id filtering for multi-tenancy",
                 "consumes": [
                     "application/json"
                 ],
@@ -68,10 +76,17 @@ const docTemplate = `{
                 "tags": [
                     "query"
                 ],
-                "summary": "Execute a natural language query",
+                "summary": "Execute a natural language query with site filtering",
                 "parameters": [
                     {
-                        "description": "Query request with optional pagination",
+                        "type": "string",
+                        "description": "Bearer token",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "Query request with required site_id for multi-tenant filtering",
                         "name": "query",
                         "in": "body",
                         "required": true,
@@ -82,13 +97,19 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "Successful query execution with results, column metadata, and pagination info",
+                        "description": "Successful query execution with results filtered by site_id",
                         "schema": {
                             "$ref": "#/definitions/models.QueryResponse"
                         }
                     },
                     "400": {
-                        "description": "Invalid request",
+                        "description": "Invalid request - missing site_id or invalid format",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized - invalid or missing token",
                         "schema": {
                             "$ref": "#/definitions/models.ErrorResponse"
                         }
@@ -110,6 +131,11 @@ const docTemplate = `{
         },
         "/query/generate": {
             "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
                 "description": "Generate a SQL query from natural language prompt without executing it",
                 "consumes": [
                     "application/json"
@@ -123,15 +149,19 @@ const docTemplate = `{
                 "summary": "Generate SQL query",
                 "parameters": [
                     {
-                        "description": "Generation request",
+                        "type": "string",
+                        "description": "Bearer token",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "Generation request with site_id",
                         "name": "request",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/models.QueryGenerateRequest"
                         }
                     }
                 ],
@@ -139,12 +169,17 @@ const docTemplate = `{
                     "200": {
                         "description": "Generated SQL query with metadata",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/models.QueryGenerateResponse"
                         }
                     },
                     "400": {
                         "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "$ref": "#/definitions/models.ErrorResponse"
                         }
@@ -160,6 +195,11 @@ const docTemplate = `{
         },
         "/query/history": {
             "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
                 "description": "Retrieve the history of previously executed queries with pagination",
                 "produces": [
                     "application/json"
@@ -169,6 +209,13 @@ const docTemplate = `{
                 ],
                 "summary": "Get query history",
                 "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bearer token",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    },
                     {
                         "type": "integer",
                         "default": 1,
@@ -188,6 +235,12 @@ const docTemplate = `{
                         "description": "Filter by user ID",
                         "name": "user_id",
                         "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Filter by site ID",
+                        "name": "site_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -198,6 +251,12 @@ const docTemplate = `{
                             "items": {
                                 "$ref": "#/definitions/models.QueryHistory"
                             }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
                         }
                     },
                     "500": {
@@ -211,6 +270,11 @@ const docTemplate = `{
         },
         "/query/validate": {
             "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
                 "description": "Validate a SQL query for syntax and security without executing it, with optimization suggestions",
                 "consumes": [
                     "application/json"
@@ -224,15 +288,19 @@ const docTemplate = `{
                 "summary": "Validate a SQL query",
                 "parameters": [
                     {
-                        "description": "Query to validate",
+                        "type": "string",
+                        "description": "Bearer token",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "Query to validate with site_id",
                         "name": "query",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/models.QueryValidateRequest"
                         }
                     }
                 ],
@@ -245,6 +313,12 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "$ref": "#/definitions/models.ErrorResponse"
                         }
@@ -555,6 +629,49 @@ const docTemplate = `{
                 }
             }
         },
+        "models.QueryGenerateRequest": {
+            "type": "object",
+            "required": [
+                "prompt",
+                "site_id"
+            ],
+            "properties": {
+                "prompt": {
+                    "type": "string",
+                    "example": "Show GGR for last month"
+                },
+                "site_id": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "example": 123
+                }
+            }
+        },
+        "models.QueryGenerateResponse": {
+            "type": "object",
+            "properties": {
+                "complexity": {
+                    "type": "string",
+                    "example": "medium"
+                },
+                "generated_sql": {
+                    "type": "string",
+                    "example": "SELECT SUM(bet_amount) - SUM(win_amount) as GGR FROM transactions WHERE site_id = 123 AND created_at \u003e= today() - 30 LIMIT 1"
+                },
+                "prompt": {
+                    "type": "string",
+                    "example": "Show GGR for last month"
+                },
+                "site_id": {
+                    "type": "integer",
+                    "example": 123
+                },
+                "timestamp": {
+                    "type": "string",
+                    "example": "2023-01-01T00:00:00Z"
+                }
+            }
+        },
         "models.QueryHistory": {
             "type": "object",
             "properties": {
@@ -571,7 +688,7 @@ const docTemplate = `{
                 },
                 "generated_sql": {
                     "type": "string",
-                    "example": "SELECT month, SUM(sales) FROM sales_table GROUP BY month"
+                    "example": "SELECT month, SUM(sales) FROM sales_table WHERE site_id = 123 GROUP BY month"
                 },
                 "prompt": {
                     "type": "string",
@@ -585,6 +702,10 @@ const docTemplate = `{
                     "type": "integer",
                     "example": 12
                 },
+                "site_id": {
+                    "type": "integer",
+                    "example": 123
+                },
                 "status": {
                     "type": "string",
                     "example": "success"
@@ -597,6 +718,9 @@ const docTemplate = `{
         },
         "models.QueryRequest": {
             "type": "object",
+            "required": [
+                "site_id"
+            ],
             "properties": {
                 "context": {
                     "type": "object"
@@ -626,6 +750,12 @@ const docTemplate = `{
                     "type": "string",
                     "example": "Show me the top 10 users by total purchase amount in the last 30 days"
                 },
+                "site_id": {
+                    "description": "Required site_id parameter (numeric)",
+                    "type": "integer",
+                    "minimum": 1,
+                    "example": 123
+                },
                 "timeout": {
                     "type": "integer",
                     "maximum": 300,
@@ -653,7 +783,7 @@ const docTemplate = `{
                 },
                 "generated_sql": {
                     "type": "string",
-                    "example": "SELECT user_id, SUM(amount) as total FROM purchases WHERE date \u003e= today() - 30 GROUP BY user_id ORDER BY total DESC LIMIT 10"
+                    "example": "SELECT user_id, SUM(amount) as total FROM purchases WHERE site_id = 123 AND created_at \u003e= today() - 30 GROUP BY user_id ORDER BY total DESC LIMIT 10"
                 },
                 "pagination": {
                     "$ref": "#/definitions/models.PaginationInfo"
@@ -722,6 +852,24 @@ const docTemplate = `{
                 "total_rows": {
                     "type": "integer",
                     "example": 50000
+                }
+            }
+        },
+        "models.QueryValidateRequest": {
+            "type": "object",
+            "required": [
+                "query",
+                "site_id"
+            ],
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "example": "SELECT * FROM users WHERE site_id = 123 LIMIT 10"
+                },
+                "site_id": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "example": 123
                 }
             }
         },
@@ -837,9 +985,16 @@ const docTemplate = `{
             }
         }
     },
+    "securityDefinitions": {
+        "ApiKeyAuth": {
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header"
+        }
+    },
     "tags": [
         {
-            "description": "Query generation and execution operations",
+            "description": "Query generation and execution operations with multi-tenant support",
             "name": "query"
         },
         {
@@ -860,7 +1015,7 @@ var SwaggerInfo = &swag.Spec{
 	BasePath:         "/api/v1",
 	Schemes:          []string{},
 	Title:            "Query Assistant API",
-	Description:      "An intelligent query assistant that uses ChatGPT to generate and execute ClickHouse queries based on natural language prompts.\n\n## Features\n- **Natural Language Processing**: Convert plain English prompts to ClickHouse SQL queries\n- **Schema-Aware**: Understands your database schema for accurate query generation\n- **Query Execution**: Automatically executes generated queries with timeout protection\n- **Secure**: Query validation and execution limits\n- **Observable**: Structured logging with Graylog integration\n\n## How it works\n1. User submits a natural language prompt about their data\n2. System sends the prompt along with schema information to ChatGPT\n3. ChatGPT generates an appropriate ClickHouse query\n4. System validates and executes the query with timeout protection\n5. Results are formatted and returned to the user",
+	Description:      "An intelligent query assistant that uses ChatGPT to generate and execute ClickHouse queries based on natural language prompts with multi-tenant support.\n\n## Features\n- **Natural Language Processing**: Convert plain English prompts to ClickHouse SQL queries\n- **Multi-Tenant Support**: All queries are filtered by site_id for data isolation\n- **Schema-Aware**: Understands your database schema for accurate query generation\n- **Business Logic**: Built-in understanding of gaming metrics (GGR = Bet - Win)\n- **Query Execution**: Automatically executes generated queries with timeout protection\n- **Secure**: Query validation, site_id enforcement, and execution limits\n- **Observable**: Structured logging with Graylog integration\n\n## Important Business Rules\n- **GGR Calculation**: Gross Gaming Revenue is always calculated as Total Bet - Total Win\n- **Site Isolation**: All queries are automatically filtered by site_id\n- **Archive Tables**: Queries on archive tables always include created_at filters\n- **RMT Tables**: Tables with 'rmt' in name use FINAL keyword for consistency\n\n## Multi-Tenant Architecture\nAll API endpoints require a numeric site_id parameter to ensure data isolation between different sites/tenants.\nThe system automatically adds WHERE site_id = {your_site_id} to all generated queries.\n\n## Authentication\nMost endpoints require a Bearer token in the Authorization header:\nAuthorization: Bearer {your-jwt-token}",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",
