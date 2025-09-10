@@ -59,8 +59,13 @@ func (s *QueryService) ProcessQuery(ctx context.Context, req *models.QueryReques
 		pageSize = 0
 	}
 
+	if req.SiteID <= 0 {
+		return nil, fmt.Errorf("site_id is required and must be a positive number")
+	}
+
 	s.logger.WithFields(logrus.Fields{
 		"query_id":         queryID,
+		"site_id":          req.SiteID,
 		"prompt":           req.Prompt,
 		"page":             page,
 		"page_size":        pageSize,
@@ -75,7 +80,7 @@ func (s *QueryService) ProcessQuery(ctx context.Context, req *models.QueryReques
 	}
 
 	// Generate SQL query using OpenAI
-	generatedSQL, err := s.openaiClient.GenerateQuery(ctx, req.Prompt, schemaInfo)
+	generatedSQL, err := s.openaiClient.GenerateQuery(ctx, req.Prompt, schemaInfo, req.SiteID)
 	if err != nil {
 		s.logger.WithError(err).Error("Failed to generate SQL query")
 		return nil, fmt.Errorf("failed to generate SQL query: %w", err)

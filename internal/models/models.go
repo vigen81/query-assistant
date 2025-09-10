@@ -4,9 +4,10 @@ import (
 	"time"
 )
 
-// QueryRequest represents the incoming query request
+// QueryRequest represents the incoming query request with multi-tenant support
 type QueryRequest struct {
 	Prompt  string                 `json:"prompt" example:"Show me the top 10 users by total purchase amount in the last 30 days"`
+	SiteID  int64                  `json:"site_id" validate:"required,min=1" example:"123"` // Required site_id parameter (numeric)
 	Context map[string]interface{} `json:"context,omitempty" swaggertype:"object"`
 	Timeout int                    `json:"timeout,omitempty" example:"30" minimum:"1" maximum:"300"`
 	// Pagination options
@@ -15,6 +16,27 @@ type QueryRequest struct {
 	// Response options
 	IncludeSchema bool `json:"include_schema,omitempty" example:"true"`
 	IncludeStats  bool `json:"include_stats,omitempty" example:"true"`
+}
+
+// QueryValidateRequest represents a query validation request
+type QueryValidateRequest struct {
+	Query  string `json:"query" validate:"required" example:"SELECT * FROM users WHERE site_id = 123 LIMIT 10"`
+	SiteID int64  `json:"site_id" validate:"required,min=1" example:"123"`
+}
+
+// QueryGenerateRequest represents a query generation request
+type QueryGenerateRequest struct {
+	Prompt string `json:"prompt" validate:"required" example:"Show GGR for last month"`
+	SiteID int64  `json:"site_id" validate:"required,min=1" example:"123"`
+}
+
+// QueryGenerateResponse represents the response from query generation
+type QueryGenerateResponse struct {
+	Prompt       string    `json:"prompt" example:"Show GGR for last month"`
+	GeneratedSQL string    `json:"generated_sql" example:"SELECT SUM(bet_amount) - SUM(win_amount) as GGR FROM transactions WHERE site_id = 123 AND created_at >= today() - 30 LIMIT 1"`
+	SiteID       int64     `json:"site_id" example:"123"`
+	Timestamp    time.Time `json:"timestamp" example:"2023-01-01T00:00:00Z"`
+	Complexity   string    `json:"complexity,omitempty" example:"medium"`
 }
 
 // ColumnMetadata represents metadata about a result column
@@ -53,7 +75,7 @@ type PaginationInfo struct {
 type QueryResponse struct {
 	QueryID      string                   `json:"query_id" example:"550e8400-e29b-41d4-a716-446655440000"`
 	Prompt       string                   `json:"prompt" example:"Show me the top 10 users by total purchase amount"`
-	GeneratedSQL string                   `json:"generated_sql" example:"SELECT user_id, SUM(amount) as total FROM purchases WHERE date >= today() - 30 GROUP BY user_id ORDER BY total DESC LIMIT 10"`
+	GeneratedSQL string                   `json:"generated_sql" example:"SELECT user_id, SUM(amount) as total FROM purchases WHERE site_id = 123 AND created_at >= today() - 30 GROUP BY user_id ORDER BY total DESC LIMIT 10"`
 	Results      []map[string]interface{} `json:"results" swaggertype:"array,object"`
 	// New fields for column metadata and pagination
 	Columns    []ColumnMetadata `json:"columns,omitempty"`
@@ -130,8 +152,9 @@ type HealthCheckDetail struct {
 type QueryHistory struct {
 	QueryID       string    `json:"query_id" example:"550e8400-e29b-41d4-a716-446655440000"`
 	UserID        string    `json:"user_id" example:"user123"`
+	SiteID        int64     `json:"site_id" example:"123"`
 	Prompt        string    `json:"prompt" example:"Show total sales by month"`
-	GeneratedSQL  string    `json:"generated_sql" example:"SELECT month, SUM(sales) FROM sales_table GROUP BY month"`
+	GeneratedSQL  string    `json:"generated_sql" example:"SELECT month, SUM(sales) FROM sales_table WHERE site_id = 123 GROUP BY month"`
 	Status        string    `json:"status" example:"success"`
 	RowCount      int       `json:"row_count" example:"12"`
 	ExecutionTime float64   `json:"execution_time" example:"0.156"`
