@@ -71,6 +71,9 @@ IMPORTANT RULES:
 12. ALWAYS include a WHERE clause that filters by site_id = %d (numeric, no quotes)
 13. If the query involves JOINs, ensure ALL joined tables are filtered by site_id = %d
 14. GGR (Gross Gaming Revenue) = Total Bet - Total Win (always calculate GGR this way)
+15. when promt is like "what's up" or "how is going" or "ինչ կա չկա" or something like that in armenian or russian give aggregated data for 
+Client(Registrations, Depostits, Withdraws, Totol balance) and Finance(Deposits amount, Withdraws amount, Correction deposit, Correction withdrawal)
+16. Whenever response includes a client id also include all fields for that user including username field from client table.
 
 SITE FILTERING RULES:
 - Every table referenced must have: WHERE site_id = %d (or AND site_id = %d if other conditions exist)
