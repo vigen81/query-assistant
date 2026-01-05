@@ -254,18 +254,29 @@ A query is PLAYER-LEVEL if:
 - It includes player_id (or client_id) in the SELECT and groups by player_id
 
 **When PLAYER-LEVEL, you MUST include BOTH:**
-1. canonical player_id: bh_transaction_main_archive.client_id (or bh_payment_archive.client_id)
-2. canonical username: m_client.username
+1. canonical player_id: Use the FACT TABLE's client_id column (a.client_id or p.client_id)
+2. canonical username: m_client.username (m.username)
 
-**Canonical Join:**
-- bh_transaction_main_archive.client_id = m_client.id AND bh_transaction_main_archive.site_id = m_client.site_id
-- bh_payment_archive.client_id = m_client.id AND bh_payment_archive.site_id = m_client.site_id
+**CRITICAL COLUMN MAPPING:**
+- m_client table has "id" (NOT "client_id")
+- Fact tables have "client_id" which joins to m_client.id
+- SELECT a.client_id (from fact table), NOT m.client_id (doesn't exist!)
+
+**Canonical Joins:**
+- bh_transaction_main_archive AS a LEFT JOIN m_client AS m ON a.client_id = m.id AND a.site_id = m.site_id
+- bh_payment_archive AS p LEFT JOIN m_client AS m ON p.client_id = m.id AND p.site_id = m.site_id
+
+**Correct SELECT for player-level:**
+SELECT a.client_id, m.username, ... GROUP BY a.client_id, m.username
+
+**WRONG (will error):**
+SELECT m.client_id  -- ERROR: m_client has no client_id column!
 
 **Rules:**
 - join_type: LEFT
 - enforcement: hard
-- fallback_allowed: true (return player_id only if join unavailable)
-- Never return username without player_id
+- fallback_allowed: true (return client_id only if join unavailable)
+- Never return username without client_id
 
 ---
 
@@ -352,6 +363,23 @@ WHERE a.site_id = {site_id}
     AND a.is_rollback = 0
 GROUP BY a.client_id, m.username
 ORDER BY total_bets DESC
+LIMIT 1000;
+
+### Top players by GGR last month:
+SELECT 
+    a.client_id,
+    m.username,
+    sumIf(a.amount, a.type = 'bet' AND a.is_rollback = 0 AND a.is_test = 0) - 
+    sumIf(a.amount, a.type = 'win' AND a.is_rollback = 0 AND a.is_test = 0) AS ggr
+FROM bh_transaction_main_archive AS a
+LEFT JOIN m_client AS m ON a.client_id = m.id AND a.site_id = m.site_id
+WHERE a.site_id = {site_id}
+    AND a.created_at_dt >= toStartOfMonth(today()) - INTERVAL 1 MONTH
+    AND a.created_at_dt < toStartOfMonth(today())
+    AND a.is_test = 0
+    AND a.is_rollback = 0
+GROUP BY a.client_id, m.username
+ORDER BY ggr DESC
 LIMIT 1000;
 
 ---
