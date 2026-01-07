@@ -179,10 +179,10 @@ client_account, client_bonus, client_product, client_tag_client, exchange, game,
 | wins amount, total wins, player winnings, winnings, payouts from games | wins_amount | wins_amount |
 | ggr, gross gaming revenue, gaming revenue, game revenue, house win, operator win, gross win | ggr | ggr |
 | ngr, net gaming revenue, net revenue from games, net game revenue, net win | ngr | ngr |
-| active players, bettors | active_players_bets | active_players_bets |
+| active players, bettors, players, betting players, real money players | active_players_bets | active_players_bets |
 | deposits, deposit volume, total deposits, player deposits, cash in | deposits_amount | deposits_amount |
 | withdrawals, cash out, cashouts | withdrawals_amount | withdrawals_amount |
-| ftd, new depositors, first time depositors | ftd_count | ftd_count |
+| ftd, new depositors, first time depositors, new depositing players | ftd_count | ftd_count |
 | rtp, return to player, payout ratio | rtp | rtp |
 | margin, hold, ggr margin | ggr_margin | ggr_margin |
 | average bet, avg bet, avg stake | avg_bet | avg_bet |
@@ -202,7 +202,7 @@ client_account, client_bonus, client_product, client_tag_client, exchange, game,
 
 | phrase | candidate_ids | clarification_prompt |
 |--------|---------------|---------------------|
-| revenue | ggr, net_deposits | Do you mean GGR (bets−wins) or Net Deposits (cash in−cash out)? |
+| revenue | ggr, net_deposits | Do you mean GGR (bets-wins) or Net Deposits (cash in-cash out)? |
 | profit | ggr, net_deposits | Do you mean gaming profit (GGR) or cash flow profit (Net Deposits)? |
 | net profit, profitability, overall profit | ggr, ngr | Do you mean GGR (gross gaming revenue) or NGR (net gaming revenue after costs)? |
 | casino profit, sportsbook profit | ggr, ngr | Do you mean GGR (gross gaming revenue) or NGR (net gaming revenue after costs)? |
@@ -254,28 +254,34 @@ A query is PLAYER-LEVEL if:
 - It includes player_id (or client_id) in the SELECT and groups by player_id
 
 **When PLAYER-LEVEL, you MUST include BOTH:**
-1. canonical player_id: Use the FACT TABLE's client_id column (a.client_id or p.client_id)
-2. canonical username: m_client.username (m.username)
+1. canonical player_id: <FACT>.client_id (from the fact table, e.g., a.client_id)
+2. canonical username: m_client.username (from the client table, e.g., m.username)
 
 **CRITICAL COLUMN MAPPING:**
-- m_client table has "id" (NOT "client_id")
-- Fact tables have "client_id" which joins to m_client.id
-- SELECT a.client_id (from fact table), NOT m.client_id (doesn't exist!)
+- canonical_player_id_fact: <FACT>.client_id - the client_id column from fact table
+- canonical_client_pk: m_client.id - the PRIMARY KEY of m_client (NOT client_id!)
+- canonical_username: m_client.username
+- canonical_join: <FACT>.client_id = m_client.id AND <FACT>.site_id = m_client.site_id
+
+**Where <FACT> is replaced by:**
+- bh_transaction_main_archive (alias: a) for gaming queries
+- bh_payment_archive (alias: p) for payment queries
 
 **Canonical Joins:**
 - bh_transaction_main_archive AS a LEFT JOIN m_client AS m ON a.client_id = m.id AND a.site_id = m.site_id
-- bh_payment_archive AS p LEFT JOIN m_client AS m ON p.client_id = m.id AND p.site_id = m.site_id
+- bh_payment_archive AS p FINAL LEFT JOIN m_client AS m ON p.client_id = m.id AND p.site_id = m.site_id
 
 **Correct SELECT for player-level:**
 SELECT a.client_id, m.username, ... GROUP BY a.client_id, m.username
 
 **WRONG (will error):**
-SELECT m.client_id  -- ERROR: m_client has no client_id column!
+SELECT m.client_id  -- ERROR: m_client has "id" not "client_id"!
 
 **Rules:**
 - join_type: LEFT
 - enforcement: hard
 - fallback_allowed: true (return client_id only if join unavailable)
+- applies_when: player_level
 - Never return username without client_id
 
 ---
@@ -350,22 +356,7 @@ WHERE site_id = {site_id}
     AND is_test = 0
 LIMIT 1000;
 
-### Player-level bets (with username):
-SELECT 
-    a.client_id,
-    m.username,
-    sumIf(a.amount, a.type = 'bet' AND a.is_rollback = 0 AND a.is_test = 0) AS total_bets
-FROM bh_transaction_main_archive AS a
-LEFT JOIN m_client AS m ON a.client_id = m.id AND a.site_id = m.site_id
-WHERE a.site_id = {site_id}
-    AND a.created_at_dt >= toDate(now()) - 7
-    AND a.is_test = 0
-    AND a.is_rollback = 0
-GROUP BY a.client_id, m.username
-ORDER BY total_bets DESC
-LIMIT 1000;
-
-### Top players by GGR last month:
+### Top players by GGR last month (PLAYER-LEVEL QUERY):
 SELECT 
     a.client_id,
     m.username,
@@ -382,6 +373,20 @@ GROUP BY a.client_id, m.username
 ORDER BY ggr DESC
 LIMIT 1000;
 
+### Player-level deposits (PLAYER-LEVEL QUERY):
+SELECT 
+    p.client_id,
+    m.username,
+    sumIf(p.amount, p.type = 'deposit' AND p.status IN (1, 2) AND p.is_test = 0) AS total_deposits
+FROM bh_payment_archive AS p FINAL
+LEFT JOIN m_client AS m ON p.client_id = m.id AND p.site_id = m.site_id
+WHERE p.site_id = {site_id}
+    AND p.created_at_dt >= toDate(now()) - 30
+    AND p.is_test = 0
+GROUP BY p.client_id, m.username
+ORDER BY total_deposits DESC
+LIMIT 1000;
+
 ---
 
 ## 12. FINAL CHECK BEFORE OUTPUT
@@ -393,6 +398,6 @@ Before outputting, verify:
 - [ ] SQL uses only dictionary-defined entities
 - [ ] Physical table names used (bh_transaction_main_archive, bh_payment_archive, m_client)
 - [ ] FINAL keyword syntax correct for bh_payment_archive (alias BEFORE FINAL)
-- [ ] Player-level queries include both client_id AND username
+- [ ] Player-level queries include both client_id (from fact table) AND username (from m_client)
 - [ ] Output is either: single SQL SELECT OR one exact predefined sentence
 `
