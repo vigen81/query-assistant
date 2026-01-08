@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"regexp"
 	"strings"
 	"time"
 
@@ -47,20 +46,16 @@ func (c *Client) GenerateQuery(ctx context.Context, prompt string, schemaInfo *m
 	ctx, cancel := context.WithTimeout(ctx, c.config.GetOpenAITimeout())
 	defer cancel()
 
-	// Build the system message with semantic dictionary
-	systemMessage := c.buildSemanticDictionarySystemMessage(siteID)
+	// Build messages in the correct order:
+	// 1. System Prompt (instructions)
+	// 2. Dictionary (semantic mappings)
+	// 3. DDL (database schema)
+	// 4. User Prompt (actual query request)
 
-	// Build the user message
-	userMessage := fmt.Sprintf(`Generate a ClickHouse SQL query for the following request: "%s"
-
-SITE CONTEXT: All queries MUST filter by site_id = %d (numeric, no quotes)
-
-Remember:
-- Use ONLY tables, columns, metrics, and joins defined in the Semantic Dictionary
-- Apply default filters (is_test=0, is_rollback=0, status IN (1,2) for payments)
-- Include LIMIT 1000 unless specified otherwise
-- GGR = Bets - Wins (ALWAYS)
-- Return ONLY the raw SQL query - no markdown, no explanations`, prompt, siteID)
+	systemMessage := c.buildSystemPrompt(siteID)
+	dictionaryMessage := c.buildDictionaryMessage()
+	ddlMessage := c.buildDDLMessage()
+	userMessage := c.buildUserMessage(prompt, siteID)
 
 	model := os.Getenv("OPENAI_MODEL")
 	if model == "" {
@@ -74,6 +69,22 @@ Remember:
 		},
 		{
 			Role:    openai.ChatMessageRoleUser,
+			Content: dictionaryMessage,
+		},
+		{
+			Role:    openai.ChatMessageRoleAssistant,
+			Content: "I have loaded the Semantic Dictionary. I understand all table mappings, metrics, dimensions, joins, and semantic aliases. Ready to generate SQL queries.",
+		},
+		{
+			Role:    openai.ChatMessageRoleUser,
+			Content: ddlMessage,
+		},
+		{
+			Role:    openai.ChatMessageRoleAssistant,
+			Content: "I have loaded the Database Schema (DDL). I understand all column names, data types, and table structures. Ready for your query.",
+		},
+		{
+			Role:    openai.ChatMessageRoleUser,
 			Content: userMessage,
 		},
 	}
@@ -82,7 +93,20 @@ Remember:
 		"prompt":  prompt,
 		"site_id": siteID,
 		"model":   model,
-	}).Debug("Requesting query generation from OpenAI with semantic dictionary")
+	}).Debug("Requesting query generation from OpenAI")
+
+	// Log full request for debugging (set LOG_OPENAI_REQUEST=true to enable)
+	if os.Getenv("LOG_OPENAI_REQUEST") == "true" {
+		c.logger.WithFields(logrus.Fields{
+			"system_prompt_length": len(systemMessage),
+			"dictionary_length":    len(dictionaryMessage),
+			"ddl_length":           len(ddlMessage),
+			"user_message":         userMessage,
+			"model":                model,
+			"max_tokens":           c.config.OpenAI.MaxTokens,
+			"temperature":          c.config.OpenAI.Temperature,
+		}).Debug("OpenAI request summary")
+	}
 
 	resp, err := c.client.CreateChatCompletion(
 		ctx,
@@ -109,36 +133,40 @@ Remember:
 
 	generatedQuery := strings.TrimSpace(resp.Choices[0].Message.Content)
 
-	// Check if this is a predefined response (clarification or off-topic)
+	// Check if this is a predefined response (not SQL)
 	if c.isPredefinedResponse(generatedQuery) {
 		c.logger.WithFields(logrus.Fields{
 			"response": generatedQuery,
 			"site_id":  siteID,
-		}).Info("Received predefined response from AI")
+		}).Info("Received predefined response (clarification or off-topic)")
 		return generatedQuery, nil
 	}
 
-	// Validate site_id presence for SQL queries
-	if !c.validateSiteIDPresent(generatedQuery, siteID) {
+	// Clean up the query
+	generatedQuery = cleanQuery(generatedQuery)
+
+	// Validate that the query contains the site_id filter
+	if !strings.Contains(generatedQuery, fmt.Sprintf("site_id = %d", siteID)) &&
+		!strings.Contains(generatedQuery, fmt.Sprintf("site_id=%d", siteID)) {
 		c.logger.WithFields(logrus.Fields{
 			"generated_query": generatedQuery,
 			"site_id":         siteID,
-		}).Warn("Generated query missing site_id filter, attempting to add")
-		generatedQuery = c.ensureSiteIDFilter(generatedQuery, siteID)
+		}).Warn("Generated query may be missing site_id filter")
 	}
 
 	c.logger.WithFields(logrus.Fields{
-		"generated_query": generatedQuery,
-		"site_id":         siteID,
-		"tokens_used":     resp.Usage.TotalTokens,
+		"generated_query":   generatedQuery,
+		"site_id":           siteID,
+		"tokens_used":       resp.Usage.TotalTokens,
+		"prompt_tokens":     resp.Usage.PromptTokens,
+		"completion_tokens": resp.Usage.CompletionTokens,
 	}).Info("Query generated successfully")
 
 	return generatedQuery, nil
 }
 
-// buildSemanticDictionarySystemMessage creates the system message using the SemanticDictionary constant
-func (c *Client) buildSemanticDictionarySystemMessage(siteID int64) string {
-	// Use the SemanticDictionary constant from semantic_dictionary.go and inject the site_id
+// buildSystemPrompt creates the system prompt with core instructions
+func (c *Client) buildSystemPrompt(siteID int64) string {
 	return fmt.Sprintf(`%s
 
 ---
@@ -147,12 +175,36 @@ func (c *Client) buildSemanticDictionarySystemMessage(siteID int64) string {
 
 **Site ID**: %d
 **CRITICAL**: All queries MUST filter by site_id = %d (numeric, no quotes)
+`, SystemPrompt, siteID, siteID)
+}
 
-Apply this filter to:
-- Every table that has a site_id column
-- Both sides of JOINs where both tables have site_id
-- Subqueries and CTEs
-`, SemanticDictionary, siteID, siteID)
+// buildDictionaryMessage creates the dictionary context message
+func (c *Client) buildDictionaryMessage() string {
+	return fmt.Sprintf(`Please load this Semantic Dictionary for reference:
+
+%s`, SemanticDictionary)
+}
+
+// buildDDLMessage creates the DDL schema context message
+func (c *Client) buildDDLMessage() string {
+	return fmt.Sprintf(`Please load this Database Schema (DDL) for reference:
+
+%s`, DDLSchema)
+}
+
+// buildUserMessage creates the user query message
+func (c *Client) buildUserMessage(prompt string, siteID int64) string {
+	return fmt.Sprintf(`Generate a ClickHouse SQL query for: "%s"
+
+REQUIREMENTS:
+- site_id = %d (MANDATORY)
+- Use physical table names (bh_transaction_main_archive, bh_payment_archive, m_client)
+- Apply default filters (is_test=0, is_rollback=0, status IN (1,2))
+- Include LIMIT 1000
+- For player-level queries: SELECT a.client_id, m.username (NOT m.client_id!)
+- For bh_payment_archive: use FINAL keyword (FROM bh_payment_archive AS pa FINAL)
+
+OUTPUT: Raw SQL only, no markdown, no explanations.`, prompt, siteID)
 }
 
 // isPredefinedResponse checks if the response is a predefined message (not SQL)
@@ -167,124 +219,78 @@ func (c *Client) isPredefinedResponse(response string) bool {
 			return true
 		}
 	}
-	return false
-}
-
-// validateSiteIDPresent checks if the query contains proper numeric site_id filtering
-func (c *Client) validateSiteIDPresent(query string, siteID int64) bool {
-	lowerQuery := strings.ToLower(query)
-
-	if !strings.Contains(lowerQuery, "site_id") {
-		return false
-	}
-
-	expectedPatterns := []string{
-		fmt.Sprintf("site_id = %d", siteID),
-		fmt.Sprintf("site_id=%d", siteID),
-	}
-
-	for _, pattern := range expectedPatterns {
-		if strings.Contains(lowerQuery, strings.ToLower(pattern)) {
-			return true
-		}
-	}
-
-	// Check for quoted values (incorrect)
-	quotedPatterns := []string{
-		fmt.Sprintf("site_id = '%d'", siteID),
-		fmt.Sprintf("site_id='%d'", siteID),
-	}
-
-	for _, pattern := range quotedPatterns {
-		if strings.Contains(lowerQuery, strings.ToLower(pattern)) {
-			return false // Trigger correction
-		}
-	}
 
 	return false
 }
 
-// ensureSiteIDFilter adds numeric site_id filter if missing
-func (c *Client) ensureSiteIDFilter(query string, siteID int64) string {
-	upperQuery := strings.ToUpper(query)
-	siteFilter := fmt.Sprintf("site_id = %d", siteID)
+// cleanQuery removes markdown formatting and extra whitespace from generated queries
+func cleanQuery(query string) string {
+	// Remove markdown code blocks
+	query = strings.TrimPrefix(query, "```sql")
+	query = strings.TrimPrefix(query, "```SQL")
+	query = strings.TrimPrefix(query, "```")
+	query = strings.TrimSuffix(query, "```")
 
-	// Fix quoted site_id values first
-	query = c.fixQuotedSiteID(query, siteID)
-	upperQuery = strings.ToUpper(query)
+	// Remove any leading/trailing whitespace
+	query = strings.TrimSpace(query)
 
-	if c.validateSiteIDPresent(query, siteID) {
-		return query
-	}
-
-	if strings.Contains(upperQuery, "WHERE") {
-		whereIndex := strings.Index(upperQuery, "WHERE")
-		if whereIndex >= 0 {
-			beforeWhere := query[:whereIndex+5]
-			afterWhere := query[whereIndex+5:]
-
-			if !strings.Contains(strings.ToLower(afterWhere), "site_id") {
-				return fmt.Sprintf("%s %s AND%s", beforeWhere, siteFilter, afterWhere)
-			}
-		}
-	} else if strings.Contains(upperQuery, "FROM") {
-		fromMatch := regexp.MustCompile(`(?i)FROM\s+(\S+)`).FindStringIndex(query)
-		if fromMatch != nil {
-			remainingQuery := query[fromMatch[1]:]
-			keywords := []string{"GROUP", "ORDER", "LIMIT", "HAVING", "UNION", ";"}
-
-			insertPos := len(query)
-			for _, keyword := range keywords {
-				if idx := strings.Index(strings.ToUpper(remainingQuery), keyword); idx > 0 {
-					insertPos = fromMatch[1] + idx
-					break
-				}
-			}
-
-			beforeInsert := strings.TrimSpace(query[:insertPos])
-			afterInsert := query[insertPos:]
-			return fmt.Sprintf("%s WHERE %s %s", beforeInsert, siteFilter, afterInsert)
+	// Normalize internal whitespace
+	lines := strings.Split(query, "\n")
+	var cleanedLines []string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			cleanedLines = append(cleanedLines, line)
 		}
 	}
-
-	c.logger.WithFields(logrus.Fields{
-		"query":   query,
-		"site_id": siteID,
-	}).Warn("Could not automatically add site_id filter")
+	query = strings.Join(cleanedLines, "\n")
 
 	return query
 }
 
-// fixQuotedSiteID fixes incorrectly quoted site_id values
-func (c *Client) fixQuotedSiteID(query string, siteID int64) string {
-	wrongPatterns := []string{
-		fmt.Sprintf("site_id = '%d'", siteID),
-		fmt.Sprintf("site_id='%d'", siteID),
-		fmt.Sprintf(`site_id = "%d"`, siteID),
-		fmt.Sprintf(`site_id="%d"`, siteID),
+// ValidateQuery performs basic validation on a generated query
+func (c *Client) ValidateQuery(query string, siteID int64) error {
+	// Check for required site_id filter
+	if !strings.Contains(query, fmt.Sprintf("site_id = %d", siteID)) &&
+		!strings.Contains(query, fmt.Sprintf("site_id=%d", siteID)) {
+		return fmt.Errorf("query must contain site_id = %d filter", siteID)
 	}
 
-	correctPattern := fmt.Sprintf("site_id = %d", siteID)
-
-	result := query
-	for _, wrong := range wrongPatterns {
-		result = strings.ReplaceAll(result, wrong, correctPattern)
+	// Check for forbidden operations
+	forbiddenOps := []string{"INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE", "TRUNCATE", "GRANT", "REVOKE"}
+	upperQuery := strings.ToUpper(query)
+	for _, op := range forbiddenOps {
+		if strings.Contains(upperQuery, op) {
+			return fmt.Errorf("query contains forbidden operation: %s", op)
+		}
 	}
 
-	return result
+	// Check for LIMIT clause
+	if !strings.Contains(upperQuery, "LIMIT") {
+		return fmt.Errorf("query must contain LIMIT clause")
+	}
+
+	return nil
 }
 
-// ValidateConnection checks if the OpenAI API is accessible
-func (c *Client) ValidateConnection(ctx context.Context) error {
+// HealthCheck verifies the OpenAI client is working
+func (c *Client) HealthCheck(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	modelsList, err := c.client.ListModels(ctx)
-	if err != nil {
-		c.logger.WithError(err).Error("OpenAI connection validation failed")
-		return fmt.Errorf("OpenAI connection validation failed: %w", err)
-	}
+	_, err := c.client.CreateChatCompletion(
+		ctx,
+		openai.ChatCompletionRequest{
+			Model: c.config.OpenAI.Model,
+			Messages: []openai.ChatCompletionMessage{
+				{
+					Role:    openai.ChatMessageRoleUser,
+					Content: "Reply with OK",
+				},
+			},
+			MaxTokens: 5,
+		},
+	)
 
-	c.logger.WithField("model_count", len(modelsList.Models)).Info("OpenAI connection validated successfully")
-	return nil
+	return err
 }
