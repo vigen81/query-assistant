@@ -55,14 +55,6 @@ func (r *SchemaRepository) GetDatabaseSchema(ctx context.Context) (*models.Schem
 			continue
 		}
 		tables[i].Columns = columns
-
-		// Get row count estimate
-		rowCount, err := r.getTableRowCount(ctx, database, tables[i].Name)
-		if err != nil {
-			r.logger.WithError(err).WithField("table", tables[i].Name).Warn("Failed to get row count")
-			rowCount = 0
-		}
-		tables[i].RowCount = rowCount
 	}
 
 	return &models.SchemaInfo{
@@ -182,36 +174,6 @@ func (r *SchemaRepository) getTableColumns(ctx context.Context, database, table 
 	return columns, nil
 }
 
-// getTableRowCount gets an approximate row count for a table
-func (r *SchemaRepository) getTableRowCount(ctx context.Context, database, table string) (uint64, error) {
-	query := `
-		SELECT sum(rows) 
-		FROM system.parts 
-		WHERE database = ? AND table = ? AND active
-	`
-
-	// Use native connection
-	conn := r.client.GetConn()
-	rows, err := conn.Query(ctx, query, database, table)
-	if err != nil {
-		return 0, err
-	}
-	defer rows.Close()
-
-	var count sql.NullInt64
-	if rows.Next() {
-		if err := rows.Scan(&count); err != nil {
-			return 0, err
-		}
-	}
-
-	if count.Valid {
-		return uint64(count.Int64), nil
-	}
-
-	return 0, nil
-}
-
 // GetTableSchema retrieves schema for a specific table
 func (r *SchemaRepository) GetTableSchema(ctx context.Context, tableName string) (*models.TableSchema, error) {
 	// Get current database using native connection
@@ -266,14 +228,6 @@ func (r *SchemaRepository) GetTableSchema(ctx context.Context, tableName string)
 		return nil, err
 	}
 	table.Columns = columns
-
-	// Get row count
-	rowCount, err := r.getTableRowCount(ctx, database, tableName)
-	if err != nil {
-		r.logger.WithError(err).Warn("Failed to get row count")
-		rowCount = 0
-	}
-	table.RowCount = rowCount
 
 	return &table, nil
 }
