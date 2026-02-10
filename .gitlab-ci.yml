@@ -19,11 +19,11 @@ build:
   rules:
     - if: '$CI_COMMIT_BRANCH  == "dev"'
       variables:
-        DOCKER_REPOSITORY: "query-assistant-service-dev"
+        DOCKER_REPOSITORY: "$CI_PROJECT_NAME-dev"
       when: always
     - if: '$CI_COMMIT_BRANCH  == "main"'
       variables:
-        DOCKER_REPOSITORY: "query-assistant-service"
+        DOCKER_REPOSITORY: "$CI_PROJECT_NAME"
       when: always
     - when: never
 
@@ -34,7 +34,7 @@ dev:migration:
   rules:
     - if: '$CI_COMMIT_BRANCH  == "dev"'
       variables:
-        DOCKER_REPOSITORY: "query-assistant-service-dev"
+        DOCKER_REPOSITORY: "$CI_PROJECT_NAME-dev"
       when: always
     - when: never
 
@@ -53,7 +53,7 @@ prod:migration:
   rules:
     - if: '$CI_COMMIT_BRANCH  == "main"'
       variables:
-        DOCKER_REPOSITORY: "query-assistant-service"
+        DOCKER_REPOSITORY: "$CI_PROJECT_NAME"
       when: always
     - when: never
 
