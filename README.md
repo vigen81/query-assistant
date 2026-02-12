@@ -133,9 +133,12 @@ curl -X POST http://localhost:8080/api/v1/query/execute \
   -H "Authorization: Bearer YOUR_TOKEN" \
   -d '{
     "prompt": "Show me the top 10 users by total purchase amount in the last 30 days",
+    "site_id": 123,
     "timeout": 30
   }'
 ```
+
+If you are running locally with `SKIP_AUTH=true`, you can omit the `Authorization` header.
 
 **Response:**
 ```json
@@ -167,7 +170,8 @@ curl -X POST http://localhost:8080/api/v1/query/validate \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer YOUR_TOKEN" \
   -d '{
-    "query": "SELECT * FROM users LIMIT 10"
+    "query": "SELECT * FROM users LIMIT 10",
+    "site_id": 123
   }'
 ```
 

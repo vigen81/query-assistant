@@ -138,11 +138,14 @@ func main() {
 		fx.Invoke(func(
 			lifecycle fx.Lifecycle,
 			fiberServer *server.FiberServer,
+			schemaRepo *repository.SchemaRepository,
 			logger *logrus.Logger,
 		) {
 			lifecycle.Append(fx.Hook{
 				OnStart: func(ctx context.Context) error {
 					logger.Info("Starting query assistant application")
+
+					schemaRepo.LogDatabaseSchema(ctx)
 
 					// Start HTTP server in goroutine
 					go func() {
