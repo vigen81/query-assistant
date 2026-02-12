@@ -22,6 +22,30 @@ func NewSchemaRepository(client *clickhouse.Client, logger *logrus.Logger) *Sche
 	}
 }
 
+// LogDatabaseSchema logs the full database schema for observability on startup
+func (r *SchemaRepository) LogDatabaseSchema(ctx context.Context) {
+	schemaInfo, err := r.GetDatabaseSchema(ctx)
+	if err != nil {
+		r.logger.WithError(err).Warn("Failed to fetch database schema for logging")
+		return
+	}
+
+	r.logger.WithFields(logrus.Fields{
+		"database": schemaInfo.Database,
+		"tables":   len(schemaInfo.Tables),
+	}).Info("ClickHouse database schema loaded")
+
+	for _, table := range schemaInfo.Tables {
+		fields := make([]string, 0, len(table.Columns))
+		for _, column := range table.Columns {
+			fields = append(fields, fmt.Sprintf("%s %s", column.Name, column.Type))
+		}
+
+		r.logger.WithField("fields", fields).
+			Infof("ClickHouse table schema: %s", table.Name)
+	}
+}
+
 // GetDatabaseSchema retrieves the complete database schema
 func (r *SchemaRepository) GetDatabaseSchema(ctx context.Context) (*models.SchemaInfo, error) {
 	// Get current database name - use the native connection instead of SQL
