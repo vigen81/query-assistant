@@ -175,21 +175,21 @@ func (c *Client) buildSystemPrompt(siteID int64) string {
 
 **Site ID**: %d
 **CRITICAL**: All queries MUST filter by site_id = %d (numeric, no quotes)
-`, SystemPrompt, siteID, siteID)
+`, GetSystemPrompt(), siteID, siteID)
 }
 
 // buildDictionaryMessage creates the dictionary context message
 func (c *Client) buildDictionaryMessage() string {
 	return fmt.Sprintf(`Please load this Semantic Dictionary for reference:
 
-%s`, SemanticDictionary)
+%s`, GetSemanticDictionary())
 }
 
 // buildDDLMessage creates the DDL schema context message
 func (c *Client) buildDDLMessage() string {
 	return fmt.Sprintf(`Please load this Database Schema (DDL) for reference:
 
-%s`, DDLSchema)
+%s`, GetDDLSchema())
 }
 
 // buildUserMessage creates the user query message
