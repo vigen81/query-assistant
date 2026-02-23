@@ -43,7 +43,7 @@ func GetSemanticDictionary() string {
 // GetDDLSchema returns the DDL schema for the current environment.
 func GetDDLSchema() string {
 	if isProdEnv() {
-		return ProdDDLSchema
+		return "" //ProdDDLSchema
 	}
 	return DevDDLSchema
 }
