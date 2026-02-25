@@ -1,16 +1,12 @@
 package openai
 
 // =============================================================================
-// SEMANTIC DICTIONARY — PROD v1.0.0
-// =============================================================================
-// Auto-generated from:
-//   - SYSTEM_PROMPT___LIVE_AI_REPORTING_v1_0_0.docx
-//   - live_dictionary_enterprise_v1_0_0.xlsx
+// SEMANTIC DICTIONARY — PROD v1.1.0  (System Prompt v1.0.1)
 // =============================================================================
 
-const ProdSemanticVersion = "1.0.0"
+const ProdSemanticVersion = "1.1.0"
 
-// ProdSystemPrompt contains the production behavioural instructions.
+// ProdSystemPrompt contains the production behavioural instructions (v1.0.1).
 const ProdSystemPrompt = `
 # SYSTEM PROMPT   LIVE AI REPORTING v1.0.0
 
@@ -26,7 +22,7 @@ Do NOT guess.
 Do NOT infer beyond the Semantic Dictionary.
 Do NOT optimize or reinterpret user intent.
 If required data cannot be resolved → FAIL FAST (Section 3).
-LIVE DDL is used ONLY to confirm column existence and data types. Dictionary remains the business authority.
+Dictionary remains the business authority.
 
 ## 1) ABSOLUTE OUTPUT RULES (NON-NEGOTIABLE)
 Output MUST be:
@@ -37,6 +33,7 @@ NO markdown
 NO explanations
 NO comments
 NO JSON
+NO formatting
 NO multiple queries
 
 ### SQL Restrictions
@@ -79,10 +76,21 @@ Rules:
 Apply it at minimum to the PRIMARY FACT table used in the query.
 If joined tables also have site_id, prefer joining with site_id equality when dictionary indicates enforce_site_match.
 Never generate cross-site queries.
+6) FACT TABLE DEFAULTS & LIVE DDL PINNING (APPLY ONLY WHEN RELEVANT)
+Fact table mapping:
+• Gaming metrics (bets, wins, GGR, NGR, margin from gaming)
+→ mt_transaction_main
+• Payment metrics (deposits, withdrawals, FTD, payment counts)
+→ mt_payment_archive
+Never use any other fact table.
+Never mix fact tables unless dictionary explicitly defines the relationship.
+If combining gaming and payment metrics:
+• Aggregate each fact table independently first.
+• Do NOT join raw fact tables before aggregation.
+• Do NOT multiply row counts.
 
-## 6) FACT TABLE DEFAULTS & LIVE DDL PINNING (APPLY ONLY WHEN RELEVANT)
-
-### 6.1 Bets & Wins (bh_transaction_main_archive)
+### 6.1 Bets & Wins (mt_transaction_main)
+Canonical fact for bets & wins in AI Reporting (use mt_transaction_main only).
 Default exclusions:
 is_test = 0
 is_rollback = 0
@@ -95,9 +103,10 @@ Rules:
 NEVER filter or group by type = ''.
 Only valid analytical values: 'bet' and 'win'.
 
-### 6.2 Deposits & Withdrawals fact table (LIVE)
+### 6.2 Deposits & Withdrawals (mt_payment_archive)
+Canonical fact for deposits & withdrawals in AI Reporting (use mt_payment_archive only).
 Primary fact table for payments:
-bh_payment_archive
+mt_payment_archive
 Default exclusions (if these columns exist on this fact table):
 is_test = 0
 Success rule (LOCKED by dictionary/business):
@@ -140,6 +149,8 @@ Use formula_clickhouse exactly from the dictionary.
 Do NOT change it.
 Important locked behavior:
 If the dictionary locks “FTD” as “FTD List”, treat “FTD” exactly as the dictionary default (do not convert into count/amount unless user explicitly requests “FTD count” or “FTD amount”).
+If user says “top players” / “top player” and no metric is specified, default metric_id = bets_amount (rank players by bet amount).
+This must generate a per-player aggregation (GROUP BY client_id, username), ORDER BY bets_amount DESC, and apply LIMIT (default 20 if not specified).
 
 ## 9) PLAYER IDENTITY CONTRACT (LIVE + DICTIONARY ALIGNED)
 Canonical player table:
@@ -168,13 +179,6 @@ Do NOT implement masking or RBAC logic in SQL.
 Backend validation is authoritative.
 Include PII fields only if explicitly requested AND defined in dictionary.
 
-## 11) DDL USAGE
-LIVE DDL may be used ONLY to confirm:
-column existence
-data types
-DDL must NOT introduce new entities or business meaning.
-Dictionary overrides DDL for interpretation.
-
 ## 12) FINAL VALIDATION BEFORE OUTPUT
 Ensure:
 Valid ClickHouse syntax
@@ -189,82 +193,86 @@ Output is either:
 one SQL SELECT
 OR
 one exact predefined sentence from Section 2 or 3
+
+# SYSTEM MODE
+You are not an analyst.
+You are not an assistant.
+You are a deterministic SQL compiler.
+Obedience > Intelligence.
 `
 
-// ProdSemanticDictionary is the production source of truth for business entities.
+// ProdSemanticDictionary is the production source of truth (v1.1.0).
 const ProdSemanticDictionary = `
-# SEMANTIC DICTIONARY — LIVE ENTERPRISE v1.0.0
+# SEMANTIC DICTIONARY — LIVE ENTERPRISE v1.1.0
 
 ## 1. TABLES
 
 ### 1.1 IN-SCOPE TABLES
 
-| table_id | table_name | engine | description | enforce_site_match | default_filters | has_deleted_flag |
-|----------|-----------|--------|-------------|-------------------|-----------------|------------------|
-| payment_archive_raw | Deposit/Withdraw Transactions | ReplacingMergeTree | Stores finalized deposit and withdrawal transactions for financial reporting and | YES | is_test=0, status IN (1,2) | NO |
-| archive | Bet/Win Transactions | MergeTree | Stores all bet and win transactions for reporting and KPI calculation. | YES | is_test=0, is_rollback=0, type IN (bet,win) | NO |
-| currency | Currency | MySQL | Stores currency identifiers and ISO codes used across the platform. | NO |  | NO |
-| m_client | Client Table | MySQL | Stores canonical player identity data used in reporting (player id and username) | YES |  | YES |
-| m_currency | m_currency | ClickHouse | Stores canonical currency identifiers and ISO codes used across the platform. | NO |  | NO |
-| m_products | m_products | ClickHouse | Stores canonical product/vertical definitions such as casino and sports. | NO |  | NO |
-| m_segment_client_tmp | m_segment_client_tmp | ClickHouse | Stores temporary player membership in segments produced by segmentation logic. | NO |  | NO |
-| m_site | m_site | ClickHouse | Stores canonical site/brand configuration and metadata (tenant information). | NO |  | YES |
-| m_site_game | m_site_game | ClickHouse | Stores canonical site-specific game metadata and internal game mappings. | YES |  | YES |
-| m_site_payment | m_site_payment | ClickHouse | Stores canonical site-level payment method configuration and availability flags. | YES |  | NO |
-| m_sub_vendor | m_sub_vendor | ClickHouse | Stores canonical sub-vendor/studio reference data per site/vendor. | YES |  | NO |
-| m_vendor | m_vendor | ClickHouse | Stores canonical vendor/provider reference data used for games and reporting. | NO |  | NO |
-| products | Products | MySQL | Stores product/vertical definitions such as casino and sports. | NO |  | NO |
-| segment | segment | ClickHouse | Stores segment definitions and metadata used by segmentation logic. | YES |  | YES |
-| site | site | ClickHouse | Stores site/brand configuration and metadata (tenant information). | NO |  | YES |
-| site_bonus | site_bonus | ClickHouse | Stores site_bonus data used by the platform. | YES |  | YES |
-| site_game | Site Games | MySQL | Stores site-specific game metadata and internal game mappings. | YES |  | YES |
-| site_payment | Payment Methods | MySQL | Stores site-level payment method configuration and availability flags. | YES |  | NO |
-| sub_vendor | Sub Vendors | MySQL | Stores sub-vendor/studio reference data per site/vendor. | YES |  | NO |
-| vendor | vendor | ClickHouse | Stores vendor/provider reference data used for games and reporting. | NO |  | YES |
+| table_id | table_name | engine | description | enforce_site_match | has_deleted_flag |
+|----------|-----------|--------|-------------|-------------------|------------------|
+| mt_payment_archive | Deposit/Withdraw Transactions | ReplacingMergeTree | Stores finalized deposit and withdrawal transactions for financial reporting and | YES | NO |
+| currency | Currency | MySQL | Stores currency identifiers and ISO codes used across the platform. | NO | NO |
+| m_client | Client Table | MySQL | Stores canonical player identity data used in reporting (player id and username) | YES | YES |
+| m_currency | m_currency | ClickHouse | Stores canonical currency identifiers and ISO codes used across the platform. | NO | NO |
+| m_products | m_products | ClickHouse | Stores canonical product/vertical definitions such as casino and sports. | NO | NO |
+| m_segment_client_tmp | m_segment_client_tmp | ClickHouse | Stores temporary player membership in segments produced by segmentation logic. | NO | NO |
+| m_site | m_site | ClickHouse | Stores canonical site/brand configuration and metadata (tenant information). | NO | YES |
+| m_site_game | m_site_game | ClickHouse | Stores canonical site-specific game metadata and internal game mappings. | YES | YES |
+| m_site_payment | m_site_payment | ClickHouse | Stores canonical site-level payment method configuration and availability flags. | YES | NO |
+| m_sub_vendor | m_sub_vendor | ClickHouse | Stores canonical sub-vendor/studio reference data per site/vendor. | YES | NO |
+| m_vendor | m_vendor | ClickHouse | Stores canonical vendor/provider reference data used for games and reporting. | NO | NO |
+| mt_transaction_main | Bet/Win Transactions | MergeTree | Canonical fact table for bets & wins. | YES | YES |
+| products | Products | MySQL | Stores product/vertical definitions such as casino and sports. | NO | NO |
+| segment | segment | ClickHouse | Stores segment definitions and metadata used by segmentation logic. | YES | YES |
+| site | site | ClickHouse | Stores site/brand configuration and metadata (tenant information). | NO | YES |
+| site_bonus | site_bonus | ClickHouse | Stores site_bonus data used by the platform. | YES | YES |
+| site_game | Site Games | MySQL | Stores site-specific game metadata and internal game mappings. | YES | YES |
+| site_payment | Payment Methods | MySQL | Stores site-level payment method configuration and availability flags. | YES | NO |
+| sub_vendor | Sub Vendors | MySQL | Stores sub-vendor/studio reference data per site/vendor. | YES | NO |
+| vendor | vendor | ClickHouse | Stores vendor/provider reference data used for games and reporting. | NO | YES |
 
 ### 1.2 IN-SCOPE (PHASE 2) TABLES — DO NOT USE YET
 
-| table_id | table_name | engine | description | notes |
-|----------|-----------|--------|-------------|-------|
-| client_bonus | Client Bonuses | MySQL | Stores bonus instances assigned to players and their lifecyc | Phase 2 — not available for NL→SQL yet |
-| client_info | client_info | ClickHouse | Stores player personal/profile information (PII) linked to p | Phase 2 — not available for NL→SQL yet |
-| client_product | Client Products | MySQL | Stores relationships between players and products/verticals  | Phase 2 — not available for NL→SQL yet |
-| client_tag_client | Client Tags Link | MySQL | Stores relationships between players and assigned tags. | Phase 2 — not available for NL→SQL yet |
-| client_tags | client_tags | ClickHouse | Stores player tag definitions and metadata per site. | Phase 2 — not available for NL→SQL yet |
-| country | country | ClickHouse | Stores country reference data used for player profiles and l | Phase 2 — not available for NL→SQL yet |
-| exchange | Exchange / Rates | MySQL | Stores site-specific currency exchange rates and currency me | Phase 2 — not available for NL→SQL yet |
-| game | Game Reference | MySQL | Stores generic game catalog metadata across vendors/provider | Phase 2 — not available for NL→SQL yet |
-| game_tag | game_tag | ClickHouse | Stores game_tag data used by the platform. | Phase 2 — not available for NL→SQL yet |
-| m_client_bonus | m_client_bonus | ClickHouse | Stores canonical bonus instances assigned to players and the | Phase 2 — not available for NL→SQL yet |
-| m_client_info | m_client_info | ClickHouse | Stores canonical player personal/profile information (PII) l | Phase 2 — not available for NL→SQL yet |
-| m_client_last_bonus_claims | m_client_last_bonus_claims | ClickHouse | Stores canonical client last bonus claims reference data mir | Phase 2 — not available for NL→SQL yet |
-| m_client_product | m_client_product | ClickHouse | Stores canonical relationships between players and products/ | Phase 2 — not available for NL→SQL yet |
-| m_client_tag_client | m_client_tag_client | ClickHouse | Stores canonical relationships between players and assigned  | Phase 2 — not available for NL→SQL yet |
-| m_client_tags | m_client_tags | ClickHouse | Stores canonical player tag definitions and metadata per sit | Phase 2 — not available for NL→SQL yet |
-| m_country | m_country | ClickHouse | Stores canonical country reference data used for player prof | Phase 2 — not available for NL→SQL yet |
-| m_exchange | m_exchange | ClickHouse | Stores canonical site-specific currency exchange rates and c | Phase 2 — not available for NL→SQL yet |
-| m_game | m_game | ClickHouse | Stores canonical generic game catalog metadata across vendor | Phase 2 — not available for NL→SQL yet |
-| m_game_tag | m_game_tag | ClickHouse | Stores canonical game tag reference data mirrored from the s | Phase 2 — not available for NL→SQL yet |
-| m_payment | m_payment | ClickHouse | Stores canonical global payment provider definitions and met | Phase 2 — not available for NL→SQL yet |
-| m_segment | m_segment | ClickHouse | Stores canonical segment definitions and metadata used by se | Phase 2 — not available for NL→SQL yet |
-| m_site_bonus | m_site_bonus | ClickHouse | Stores canonical site bonus reference data mirrored from the | Phase 2 — not available for NL→SQL yet |
-| m_site_game_site_tag | m_site_game_site_tag | ClickHouse | Stores canonical relationships between site games and site t | Phase 2 — not available for NL→SQL yet |
-| m_site_tag | m_site_tag | ClickHouse | Stores canonical site-level tag definitions used for games a | Phase 2 — not available for NL→SQL yet |
-| m_site_vendor | m_site_vendor | ClickHouse | Stores canonical relationships between vendors and sites inc | Phase 2 — not available for NL→SQL yet |
-| payment | payment | ClickHouse | Stores global payment provider definitions and metadata. | Phase 2 — not available for NL→SQL yet |
-| site_game_site_tag | Game Tags Link | MySQL | Stores relationships between site games and site tags. | Phase 2 — not available for NL→SQL yet |
-| site_tag | Site Tags | MySQL | Stores site-level tag definitions used for games and segment | Phase 2 — not available for NL→SQL yet |
-| site_vendor | site_vendor | ClickHouse | Stores relationships between vendors and sites including mai | Phase 2 — not available for NL→SQL yet |
-| client_account | Client Accounts | MySQL | Stores Client Accounts data used by the platform. | Phase 2 — not available for NL→SQL yet |
-| segment_client_tmp | Segment Membership (Temp) | MySQL | Stores temporary player membership in segments produced by s | Phase 2 — not available for NL→SQL yet |
+| table_id | table_name | engine | description |
+|----------|-----------|--------|-------------|
+| client_bonus | Client Bonuses | MySQL | Stores bonus instances assigned to players and their lifecyc |
+| client_info | client_info | ClickHouse | Stores player personal/profile information (PII) linked to p |
+| client_product | Client Products | MySQL | Stores relationships between players and products/verticals  |
+| client_tag_client | Client Tags Link | MySQL | Stores relationships between players and assigned tags. |
+| client_tags | client_tags | ClickHouse | Stores player tag definitions and metadata per site. |
+| country | country | ClickHouse | Stores country reference data used for player profiles and l |
+| exchange | Exchange / Rates | MySQL | Stores site-specific currency exchange rates and currency me |
+| game | Game Reference | MySQL | Stores generic game catalog metadata across vendors/provider |
+| game_tag | game_tag | ClickHouse | Stores game_tag data used by the platform. |
+| m_client_bonus | m_client_bonus | ClickHouse | Stores canonical bonus instances assigned to players and the |
+| m_client_info | m_client_info | ClickHouse | Stores canonical player personal/profile information (PII) l |
+| m_client_last_bonus_claims | m_client_last_bonus_claims | ClickHouse | Stores canonical client last bonus claims reference data mir |
+| m_client_product | m_client_product | ClickHouse | Stores canonical relationships between players and products/ |
+| m_client_tag_client | m_client_tag_client | ClickHouse | Stores canonical relationships between players and assigned  |
+| m_client_tags | m_client_tags | ClickHouse | Stores canonical player tag definitions and metadata per sit |
+| m_country | m_country | ClickHouse | Stores canonical country reference data used for player prof |
+| m_exchange | m_exchange | ClickHouse | Stores canonical site-specific currency exchange rates and c |
+| m_game | m_game | ClickHouse | Stores canonical generic game catalog metadata across vendor |
+| m_game_tag | m_game_tag | ClickHouse | Stores canonical game tag reference data mirrored from the s |
+| m_payment | m_payment | ClickHouse | Stores canonical global payment provider definitions and met |
+| m_segment | m_segment | ClickHouse | Stores canonical segment definitions and metadata used by se |
+| m_site_bonus | m_site_bonus | ClickHouse | Stores canonical site bonus reference data mirrored from the |
+| m_site_game_site_tag | m_site_game_site_tag | ClickHouse | Stores canonical relationships between site games and site t |
+| m_site_tag | m_site_tag | ClickHouse | Stores canonical site-level tag definitions used for games a |
+| m_site_vendor | m_site_vendor | ClickHouse | Stores canonical relationships between vendors and sites inc |
+| payment | payment | ClickHouse | Stores global payment provider definitions and metadata. |
+| site_game_site_tag | Game Tags Link | MySQL | Stores relationships between site games and site tags. |
+| site_tag | Site Tags | MySQL | Stores site-level tag definitions used for games and segment |
+| site_vendor | site_vendor | ClickHouse | Stores relationships between vendors and sites including mai |
 
 ### 1.3 OUT-OF-SCOPE TABLES (DO NOT USE)
 
-_peerdb_raw_mirror_22a671c7__3ca6__4015__b746__45d6a4ca0815, _peerdb_raw_mirror_8c855a3f__970f__45b6__a16f__0baadd636cac, _peerdb_raw_mirror_f1048483__f2ee__42ff__b4fd__cc46fb1f711c, client, mt_payment_archive, mt_transaction_main, mt_ts_archive, mv_client_top_wins, payment_sum_by_hour, test_table, transaction_payment, sub_vendor_test, payment_archive_rb
+client, mt_payment_archive, mt_ts_archive, mv_client_top_wins, payment_sum_by_hour
 
 ## 2. METRICS
 
-### 2.1 Gaming Metrics (fact_table: archive → bh_transaction_main_archive)
+### 2.1 Gaming Metrics (fact_table: mt_transaction_main)
 
 | metric_id | name | formula_clickhouse |
 |-----------|------|--------------------|
@@ -282,7 +290,7 @@ _peerdb_raw_mirror_22a671c7__3ca6__4015__b746__45d6a4ca0815, _peerdb_raw_mirror_
 | bonus_share_of_ggr | Bonus Share of GGR | (sumIf(amount,type='bet' AND is_bonus=1)-sumIf(amount,type='win' AND is_bonus=1)) / NULLIF((sumIf(amount,type='bet')-sumIf(amount,type='win')),0) |
 | ngr | Net Gaming Revenue | (   sumIf(amount, type='bet' AND is_rollback=0)   -   sumIf(amount, type='bet' AND is_rollback=0 AND (is_bonus=1 OR is_test=1)) ) - (   sumIf(amount, type='win' AND is_rollback=0)   -   sumIf(amount, type='win' AND is_rollback=0 AND (is_bonus=1 OR is_test=1)) ) |
 
-### 2.2 Payment Metrics (fact_table: payment_archive_raw → bh_payment_archive)
+### 2.2 Payment Metrics (fact_table: mt_payment_archive)
 
 | metric_id | name | formula_clickhouse |
 |-----------|------|--------------------|
@@ -290,75 +298,62 @@ _peerdb_raw_mirror_22a671c7__3ca6__4015__b746__45d6a4ca0815, _peerdb_raw_mirror_
 | withdrawals_amount | Withdrawals Amount | sumIf(amount, type='withdraw' AND status IN (1,2) AND is_test=0) |
 | net_deposits | Net Deposits | (   sumIf(amount, type='deposit' AND status IN (1,2) AND is_test=0) ) - (   sumIf(amount, type='withdraw' AND status IN (1,2) AND is_test=0) ) |
 | ftd_count | First-Time Depositors | uniqExactIf(client_id,   type='deposit'   AND status IN (1,2)   AND is_test=0   AND action_count=1 ) |
+| hold_from_deposits | Hold from Deposits | (sumIf(a.amount,a.type='bet' AND a.is_rollback=0 AND a.is_test=0)-sumIf(a.amount,a.type='win' AND a.is_rollback=0 AND a.is_test=0)) / NULLIF(sumIf(p.amount,p.type='deposit' AND p.status IN (1,2) AND p.is_test=0),0) |
 | unique_depositors | Unique Depositors | uniqExactIf(client_id, type='deposit' AND status IN (1,2) AND is_test=0) |
 | ftd_amount | First-Time Deposit Amount | sumIf(amount,   type='deposit'   AND status IN (1,2)   AND is_test=0   AND action_count=1 ) |
-| ftd_list | FTD List | SELECT   toString(p.client_id) AS client_id,   mc.username AS username,   p.created_at_dt AS first_deposit_date,   p.amount AS first_deposit_amount FROM payment_archive_raw AS p LEFT JOIN m_client AS mc   ON p.client_id = mc.id AND p.site_id = mc.site_id WHERE   p.type = 'deposit'   AND p.status IN (1,2)   AND p.is_test = 0   AND p.action_count = 1 |
+| ftd_list | FTD List | SELECT   toString(p.client_id) AS client_id,   mc.username AS username,   p.created_at_dt AS first_deposit_date,   p.amount AS first_deposit_amount FROM mt_payment_archive AS p LEFT JOIN m_client AS mc   ON p.client_id = mc.id AND p.site_id = mc.site_id WHERE   p.type = 'deposit'   AND p.status IN (1,2)   AND p.is_test = 0   AND p.action_count = 1 |
 
-### 2.3 Cross-Table Metrics
+### 2.3 Other Metrics
 
-| metric_id | name | formula_clickhouse | fact_tables |
-|-----------|------|--------------------|-------------|
-| hold_from_deposits | Hold from Deposits | (sumIf(a.amount,a.type='bet' AND a.is_rollback=0 AND a.is_test=0)-sumIf(a.amount,a.type='win' AND a.is_rollback=0 AND a.is_test=0)) / NULLIF(sumIf(p.amount,p.type='deposit' AND p.status IN (1,2) AND p.is_test=0),0) | archive+payment_archive_raw |
-
-### 2.4 Player Metrics (fact_table: m_client)
-
-| metric_id | name | formula_clickhouse | notes |
-|-----------|------|--------------------|-------|
-| registered_players | Registered Players | COUNT(DISTINCT id) | Use m_client.created_at (epoch seconds) for time filtering; convert to DateTime. |
-
-### 2.5 List Metrics (row-level output)
-
-| metric_id | name | formula_clickhouse | notes |
-|-----------|------|--------------------|-------|
-| ftd_list | FTD List | SELECT   toString(p.client_id) AS client_id,   mc.username AS username,   p.created_at_dt AS first_deposit_date,   p.amount AS first_deposit_amount FROM payment_archive_raw AS p LEFT JOIN m_client AS mc   ON p.client_id = mc.id AND p.site_id = mc.site_id WHERE   p.type = 'deposit'   AND p.status IN (1,2)   AND p.is_test = 0   AND p.action_count = 1 | When user says 'FTD' without qualifier, return this list. Do not aggregate identifiers. Locked: term |
+| metric_id | name | fact_table | formula_clickhouse |
+|-----------|------|------------|--------------------|
+| registered_players | Registered Players | m_client | COUNT(DISTINCT id) |
 
 ## 3. DIMENSIONS
 
 | dimension_id | name | type | source_tables_columns | lookup_table | display_column | synonyms |
 |--------------|------|------|----------------------|--------------|----------------|----------|
-| date | Date | temporal | archive.created_at_dt; payment_archive_raw.created_at_dt |  |  | date,day |
-| site | Site | entity | archive.site_id; payment_archive_raw.site_id; m_client.site_ | m_site | name | site,brand,operator |
-| currency | Currency | categorical | archive.currency_id; payment_archive_raw.currency_id | currency | code | currency,ccy |
-| product | Product | entity | archive.product_id; site_game.product_id | products | alias | product,vertical,category |
-| game | Game | entity | archive.internal_site_game_id; site_game.internal_game_id | site_game | title | game,title,slot |
-| vendor | Vendor | entity | archive.vendor_id; site_game.vendor_id | m_vendor | title | provider,vendor,game provider |
-| sub_vendor | Sub Vendor | categorical | archive.sub_vendor_id; sub_vendor.id | sub_vendor | title | studio,subvendor |
-| client | Player | entity | archive.client_id; payment_archive_raw.client_id; m_client.i | m_client | username | player,user,client |
-| payment_method | Payment Method | categorical | payment_archive_raw.site_payment_id | site_payment | name | psp,payment system |
-| is_test_flag | Test Flag | flag | archive.is_test; m_client.is_test; payment_archive_raw.is_te |  |  | test,qa |
-| is_bonus_flag | Bonus Flag | flag | archive.is_bonus |  |  | bonus,bonus play |
+| date | Date | temporal | mt_transaction_main.created_at_dt; mt_payment_archive.create |  |  | date,day |
+| site | Site | entity | mt_transaction_main.site_id; mt_payment_archive.site_id; m_c | m_site | name | site,brand,operator |
+| currency | Currency | categorical | mt_transaction_main.currency_id; mt_payment_archive.currency | currency | code | currency,ccy |
+| product | Product | entity | mt_transaction_main.product_id; site_game.product_id | products | alias | product,vertical,category |
+| game | Game | entity | mt_transaction_main.internal_site_game_id; site_game.interna | site_game | title | game,title,slot |
+| vendor | Vendor | entity | mt_transaction_main.vendor_id; site_game.vendor_id | m_vendor | title | provider,vendor,game provider |
+| sub_vendor | Sub Vendor | categorical | mt_transaction_main.sub_vendor_id; sub_vendor.id | sub_vendor | title | studio,subvendor |
+| client | Player | entity | mt_transaction_main.client_id; mt_payment_archive.client_id; | m_client | username | player,user,client |
+| payment_method | Payment Method | categorical | mt_payment_archive.site_payment_id | site_payment | name | psp,payment system |
+| is_test_flag | Test Flag | flag | mt_transaction_main.is_test; m_client.is_test; mt_payment_ar |  |  | test,qa |
+| is_bonus_flag | Bonus Flag | flag | mt_transaction_main.is_bonus |  |  | bonus,bonus play |
 | country | Country | categorical | m_client.meta |  | country_name | country,geo,region,jurisdiction |
-| platform | Platform | categorical | archive.meta |  | platform | device,channel,platform |
-| segment | Segment | entity | m_segment_client_tmp.segment_id | m_segment | segment_name | segment,group,cluster |
+| platform | Platform | categorical | mt_transaction_main.meta |  | platform | device,channel,platform |
 | player_tag | Player Tag | entity | client_tag_client.client_tag_id | site_tag | name | tag,label |
 | bonus_type | Bonus Type | categorical | client_bonus.status |  | bonus_type_name | bonus type,bonus category |
 | registration_date | Registration Date | temporal | m_client.created_at |  | registration_date | reg date,signup date |
 
 ## 4. JOINS
 
-### 4.1 Core Joins (IN SCOPE)
+### 4.1 Core Joins
 
 | from_table | to_table | join_type | on_conditions | cardinality | enforce_site_match |
 |------------|----------|-----------|---------------|-------------|-------------------|
-| archive | m_client | LEFT | archive.client_id = m_client.id AND archive.site_id = m_client.site_id | many_to_one | YES |
-| archive | currency | LEFT | archive.currency_id = currency.id | many_to_one | NO |
-| archive | site_game | LEFT | archive.internal_site_game_id = site_game.internal_game_id AND archive.site_id = site_game.site_id | many_to_one | YES |
-| archive | sub_vendor | LEFT | archive.sub_vendor_id = sub_vendor.id AND archive.site_id = sub_vendor.site_id | many_to_one | YES |
-| payment_archive_raw | m_client | LEFT | payment_archive_raw.client_id = m_client.id AND payment_archive_raw.site_id = m_client.site_id | many_to_one | YES |
-| payment_archive_raw | currency | LEFT | payment_archive_raw.currency_id = currency.id | many_to_one | NO |
-| payment_archive_raw | site_payment | LEFT | payment_archive_raw.site_payment_id = site_payment.id AND payment_archive_raw.site_id = site_payment.site_id | many_to_one | YES |
+| mt_transaction_main | m_client | LEFT | mt_transaction_main.client_id = m_client.id AND mt_transaction_main.site_id = m_client.site_id | many_to_one | YES |
+| mt_transaction_main | currency | LEFT | mt_transaction_main.currency_id = currency.id | many_to_one | NO |
+| mt_transaction_main | site_game | LEFT | mt_transaction_main.internal_site_game_id = site_game.internal_game_id AND mt_transaction_main.site_id = site_game.site_id | many_to_one | YES |
+| mt_transaction_main | sub_vendor | LEFT | mt_transaction_main.sub_vendor_id = sub_vendor.id AND mt_transaction_main.site_id = sub_vendor.site_id | many_to_one | YES |
+| mt_payment_archive | m_client | LEFT | mt_payment_archive.client_id = m_client.id AND mt_payment_archive.site_id = m_client.site_id | many_to_one | YES |
+| mt_payment_archive | currency | LEFT | mt_payment_archive.currency_id = currency.id | many_to_one | NO |
+| mt_payment_archive | site_payment | LEFT | mt_payment_archive.site_payment_id = site_payment.id AND mt_payment_archive.site_id = site_payment.site_id | many_to_one | YES |
 | client_bonus | m_client | LEFT | client_bonus.client_id = m_client.id | many_to_one | NO |
 | client_product | m_client | LEFT | client_product.client_id = m_client.id | many_to_one | NO |
 | client_product | products | LEFT | client_product.product_id = products.id | many_to_one | NO |
 | client_tag_client | m_client | LEFT | client_tag_client.client_id = m_client.id | many_to_one | NO |
-| m_segment_client_tmp | m_client | LEFT | m_segment_client_tmp.client_id = m_client.id | many_to_one | NO |
 | site_game_site_tag | site_game | LEFT | site_game_site_tag.site_game_id = site_game.id | many_to_one | NO |
 | exchange | currency | LEFT | exchange.currency_id = currency.id | many_to_one | NO |
-| archive | exchange | LEFT | archive.currency_id = exchange.currency_id AND archive.site_id = exchange.site_id | many_to_one | YES |
-| payment_archive_raw | exchange | LEFT | payment_archive_raw.currency_id = exchange.currency_id AND payment_archive_raw.site_id = exchange.site_id | many_to_one | YES |
-| mt_payment_archive | m_client | LEFT | mt_payment_archive.client_id = m_client.id AND mt_payment_archive.site_id = m_client.site_id | many_to_one | YES |
+| mt_transaction_main | exchange | LEFT | mt_transaction_main.currency_id = exchange.currency_id AND mt_transaction_main.site_id = exchange.site_id | many_to_one | YES |
+| mt_payment_archive | exchange | LEFT | mt_payment_archive.currency_id = exchange.currency_id AND mt_payment_archive.site_id = exchange.site_id | many_to_one | YES |
+| mt_payment_archive | m_client | LEFT | mt_payment_mt_transaction_main.client_id = m_client.id AND mt_payment_mt_transaction_main.site_id = m_client.site_id | many_to_one | YES |
 
-### 4.2 Phase 2 Joins (DO NOT USE YET)
+### 4.2 Phase 2 Joins
 
 | from_table | to_table | join_type | on_conditions | notes |
 |------------|----------|-----------|---------------|-------|
@@ -367,7 +362,7 @@ _peerdb_raw_mirror_22a671c7__3ca6__4015__b746__45d6a4ca0815, _peerdb_raw_mirror_
 
 ## 5. SEMANTIC ALIASES
 
-### 5.1 Direct Mappings (resolution_strategy = default)
+### 5.1 Direct Mappings
 
 **Metric Aliases:**
 
@@ -477,6 +472,9 @@ _peerdb_raw_mirror_22a671c7__3ca6__4015__b746__45d6a4ca0815, _peerdb_raw_mirror_
 - registrations -> registered_players
 - signups -> registered_players
 - registered players -> registered_players
+- top players -> bets_amount
+- top player -> bets_amount
+- top gamblers -> bets_amount
 
 **Dimension Aliases:**
 
@@ -597,7 +595,7 @@ _peerdb_raw_mirror_22a671c7__3ca6__4015__b746__45d6a4ca0815, _peerdb_raw_mirror_
 - year to date -> ytd
 - ytd -> ytd
 
-### 5.2 Ambiguous Terms (resolution_strategy = clarify) — MUST ASK USER
+### 5.2 Ambiguous Terms (MUST ASK USER)
 
 | phrase | canonical_kind | candidate_ids | clarification |
 |--------|---------------|---------------|---------------|
@@ -618,7 +616,7 @@ _peerdb_raw_mirror_22a671c7__3ca6__4015__b746__45d6a4ca0815, _peerdb_raw_mirror_
 | first time deposit | metric |  | Do you mean FTD Count or FTD Amount? |
 | first-time deposit | metric |  | Do you mean FTD Count or FTD Amount? |
 
-### 5.3 Unsupported Terms (resolution_strategy = off_topic) — REJECT
+### 5.3 Unsupported Terms (REJECT)
 
 losing players, big players
 
@@ -651,7 +649,6 @@ losing players, big players
 - **player_id_aliases**: player_id, player id, playerID, player_ids, player ids
 - **canonical_player_id_output_field**: client_id
 - **canonical_player_id_label**: Player ID
-- **fallback_allowed**: False
 - **canonical_player_id_output_expression**: toString(<FACT>.client_id) AS client_id
 - **canonical_username_output_expression**: m_client.username AS username
 - **no_identifier_aggregation_rule**: Never aggregate player identifiers; client_id and username must be returned at row-level or grouped by client_id explicitly.
@@ -663,7 +660,7 @@ SELECT
     sg.title AS game_name,
     sumIf(a.amount, a.type = 'bet' AND a.is_rollback = 0 AND a.is_test = 0) - 
     sumIf(a.amount, a.type = 'win' AND a.is_rollback = 0 AND a.is_test = 0) AS ggr
-FROM bh_transaction_main_archive AS a
+FROM mt_transaction_main AS a
 LEFT JOIN site_game AS sg ON a.internal_site_game_id = sg.internal_game_id AND a.site_id = sg.site_id
 WHERE a.site_id = {site_id}
     AND a.created_at_dt >= toDate(now()) - 7
@@ -673,28 +670,26 @@ GROUP BY sg.title
 ORDER BY ggr DESC
 LIMIT 1000;
 
-### Top players by GGR last month:
+### Top players by bets amount (default "top players" query):
 SELECT 
     toString(a.client_id) AS client_id,
     m.username,
-    sumIf(a.amount, a.type = 'bet' AND a.is_rollback = 0 AND a.is_test = 0) - 
-    sumIf(a.amount, a.type = 'win' AND a.is_rollback = 0 AND a.is_test = 0) AS ggr
-FROM bh_transaction_main_archive AS a
+    sumIf(a.amount, a.type = 'bet' AND a.is_rollback = 0 AND a.is_test = 0) AS bets_amount
+FROM mt_transaction_main AS a
 LEFT JOIN m_client AS m ON a.client_id = m.id AND a.site_id = m.site_id
 WHERE a.site_id = {site_id}
-    AND a.created_at_dt >= toStartOfMonth(today()) - INTERVAL 1 MONTH
-    AND a.created_at_dt < toStartOfMonth(today())
+    AND a.created_at_dt >= toDate(now()) - 30
     AND a.is_test = 0 AND a.is_rollback = 0
     AND a.type IN ('bet', 'win')
 GROUP BY a.client_id, m.username
-ORDER BY ggr DESC
-LIMIT 1000;
+ORDER BY bets_amount DESC
+LIMIT 20;
 
 ### Deposits this month:
 SELECT 
     toDate(created_at_dt) AS date,
     sumIf(amount, type = 'deposit' AND status IN (1, 2) AND is_test = 0) AS deposits
-FROM bh_payment_archive AS pa FINAL
+FROM mt_payment_archive FINAL
 WHERE site_id = {site_id}
     AND created_at_dt >= toStartOfMonth(today())
     AND is_test = 0
@@ -702,22 +697,13 @@ GROUP BY date
 ORDER BY date
 LIMIT 1000;
 
-### New registrations last week:
-SELECT COUNT(DISTINCT id) AS new_registrations
-FROM m_client
-WHERE site_id = {site_id}
-    AND created_at >= toUnixTimestamp(toStartOfWeek(today()) - 7)
-    AND created_at < toUnixTimestamp(toStartOfWeek(today()))
-    AND is_test = 0
-LIMIT 1000;
-
-### FTD List (first-time depositors) last 30 days:
+### FTD List last 30 days:
 SELECT
     toString(p.client_id) AS client_id,
     mc.username AS username,
     p.created_at_dt AS first_deposit_date,
     p.amount AS first_deposit_amount
-FROM bh_payment_archive AS p FINAL
+FROM mt_payment_archive AS p FINAL
 LEFT JOIN m_client AS mc ON p.client_id = mc.id AND p.site_id = mc.site_id
 WHERE p.site_id = {site_id}
     AND p.type = 'deposit'
@@ -739,38 +725,24 @@ SELECT
       sumIf(amount, type='win' AND is_rollback=0)
       - sumIf(amount, type='win' AND is_rollback=0 AND (is_bonus=1 OR is_test=1))
     ) AS ngr
-FROM bh_transaction_main_archive AS a
+FROM mt_transaction_main AS a
 WHERE a.site_id = {site_id}
     AND a.created_at_dt >= toDate(now()) - 30
-    AND a.type IN ('bet', 'win')
-LIMIT 1000;
-
-### Hold from deposits (cross-table) last 30 days:
-SELECT 
-    (sumIf(a.amount, a.type = 'bet' AND a.is_rollback = 0 AND a.is_test = 0) - 
-     sumIf(a.amount, a.type = 'win' AND a.is_rollback = 0 AND a.is_test = 0)) /
-    NULLIF((SELECT sumIf(amount, type = 'deposit' AND status IN (1,2) AND is_test = 0) 
-            FROM bh_payment_archive FINAL 
-            WHERE site_id = {site_id} AND created_at_dt >= toDate(now()) - 30), 0) AS hold_from_deposits
-FROM bh_transaction_main_archive AS a
-WHERE a.site_id = {site_id}
-    AND a.created_at_dt >= toDate(now()) - 30
-    AND a.is_test = 0 AND a.is_rollback = 0
     AND a.type IN ('bet', 'win')
 LIMIT 1000;
 `
 
-// ProdDDLSchema provides the production column-level schema.
+// ProdDDLSchema provides the production column-level schema (v1.1.0).
 const ProdDDLSchema = `
-# DATABASE SCHEMA (DDL) — LIVE ENTERPRISE v1.0.0
+# DATABASE SCHEMA (DDL) — LIVE ENTERPRISE v1.1.0
 
 ## IMPORTANT RULES
 - Columns with should_exclude_from_filters=YES must NOT appear in WHERE/GROUP BY/SELECT
 - NEVER select: _peerdb_synced_at, _peerdb_is_deleted, _peerdb_version, microtime
-- archive.type Enum includes ''=0 (UNKNOWN) — NEVER use it; enforce type IN ('bet','win')
+- mt_transaction_main.type Enum includes ''=0 (UNKNOWN) — NEVER use it; enforce type IN ('bet','win')
 - client_id must be returned as toString(<FACT>.client_id) AS client_id
 
-## Bet/Win Transactions (archive)
+## Bet/Win Transactions (mt_transaction_main)
 
 | column | type | description | semantic_type | nullable | exclude_from_filters |
 |--------|------|-------------|---------------|----------|---------------------|
@@ -802,10 +774,10 @@ const ProdDDLSchema = `
 | site_id | UInt32 | Site/brand ID | id | NO | NO |
 | sub_vendor_id | Nullable(UInt32) | Vendor/provider identifier. | id | YES | NO |
 | table_id | UInt64 | Identifier / foreign key. | id | NO | NO |
-| type | Enum8('bet'=-1,''=0,'win'=1) | Type/category Physical DDL also contains empty enum value '' | category | NO | NO |
+| type | Enum8('bet' = -1, '' = 0, 'win' = 1) | Type/category Physical DDL also contains empty enum value '' | category | NO | NO |
 | vendor_id | UInt32 | Vendor/provider ID | id | NO | NO |
 
-## Deposit/Withdraw Transactions (payment_archive_raw)
+## Deposit/Withdraw Transactions (mt_payment_archive)
 
 | column | type | description | semantic_type | nullable | exclude_from_filters |
 |--------|------|-------------|---------------|----------|---------------------|
@@ -847,6 +819,49 @@ const ProdDDLSchema = `
 | status | UInt16 | Status code | category | NO | NO |
 | transaction_id | String | Identifier / foreign key. | id | NO | NO |
 | type | Enum8('withdraw'=-1,'deposit'=1) | Type/category | category | NO | NO |
+| updated_at | Date | Update date/timestamp | date | NO | NO |
+| updated_at_dt | DateTime64(3) | Update datetime | datetime | NO | NO |
+| updated_at_ts | UInt64 | Epoch timestamp (technical). | string | NO | NO |
+| withdraw_fee_amount | Nullable(Decimal(18, 8)) | Amount value. | amount | YES | NO |
+| withdraw_fee_percent | Nullable(Decimal(18, 8)) | Withdraw fee percent field. | amount | YES | NO |
+| action_count | Nullable(UInt32) | Actions count | string | YES | NO |
+| after_balance | Nullable(Decimal(18, 8)) | Amount value. | amount | YES | NO |
+| amount | Decimal(18, 8) | Monetary amount field. | amount | NO | NO |
+| base_amount | Nullable(Decimal(18, 8)) | Amount in base currency | amount | YES | NO |
+| before_balance | Nullable(Decimal(18, 8)) | Amount value. | amount | YES | NO |
+| bind | Bool | Boolean flag. | flag | NO | NO |
+| btag | Nullable(String) | Btag field. | string | YES | NO |
+| cashback_id | Nullable(UInt32) | Identifier / foreign key. | id | YES | NO |
+| client_account_id | UInt32 | Identifier / foreign key. | id | NO | NO |
+| client_account_type | String | Client account type field. | string | NO | NO |
+| client_bonus_id | Nullable(UInt32) | Identifier / foreign key. | id | YES | NO |
+| client_id | UInt32 | Identifier used for joins and filtering. | identifier | NO | NO |
+| created_at | Date | Creation date/timestamp | date | NO | NO |
+| created_at_dt | DateTime64(3) | Creation datetime | datetime | NO | NO |
+| created_at_ts | UInt64 | Epoch timestamp (technical). | string | NO | NO |
+| currency_code | String | Currency code | category | NO | NO |
+| currency_id | UInt16 | Currency ID | id | NO | NO |
+| external_transaction_id | Nullable(String) | Identifier / foreign key. | id | YES | NO |
+| id | UInt64 | Primary key row identifier. | id | NO | NO |
+| info | Nullable(String) | Info/notes metadata | metadata | YES | YES |
+| is_correction | Bool | Boolean flag. | flag | NO | NO |
+| is_land_based | Bool | Boolean flag. | flag | NO | NO |
+| is_test | Bool | Test/QA flag | flag | NO | NO |
+| meta | Nullable(String) | JSON metadata | metadata | YES | YES |
+| microtime | Float64 | Versioning field | string | NO | YES |
+| rates | Nullable(String) | FX rates metadata | metadata | YES | YES |
+| ref_transaction_id | Nullable(UInt64) | Identifier / foreign key. | id | YES | NO |
+| settled_at | Nullable(Date) | Settlement date | date | YES | NO |
+| settled_at_dt | Nullable(DateTime64(3)) | Settlement datetime | datetime | YES | NO |
+| settled_at_ts | Nullable(UInt64) | Epoch timestamp (technical). | string | YES | NO |
+| site_bonus_action_type | Nullable(String) | Site bonus action type field. | string | YES | NO |
+| site_bonus_id | Nullable(UInt32) | Identifier / foreign key. | id | YES | NO |
+| site_id | UInt32 | Site/brand ID | id | NO | NO |
+| site_payment_id | UInt32 | Site payment method ID | id | NO | NO |
+| site_payment_type | Enum8('system' = 1, 'not_system' = 2) | Site payment type field. | string | NO | NO |
+| status | UInt16 | Status code | category | NO | NO |
+| transaction_id | String | Identifier / foreign key. | id | NO | NO |
+| type | Enum8('withdraw' = -1, 'deposit' = 1) | Type/category | category | NO | NO |
 | updated_at | Date | Update date/timestamp | date | NO | NO |
 | updated_at_dt | DateTime64(3) | Update datetime | datetime | NO | NO |
 | updated_at_ts | UInt64 | Epoch timestamp (technical). | string | NO | NO |
@@ -1780,5 +1795,5 @@ const ProdDDLSchema = `
 ## OUT-OF-SCOPE TABLES (DO NOT USE)
 
 The following tables must NEVER be used in generated queries:
-_peerdb_raw_mirror_22a671c7__3ca6__4015__b746__45d6a4ca0815, _peerdb_raw_mirror_8c855a3f__970f__45b6__a16f__0baadd636cac, _peerdb_raw_mirror_f1048483__f2ee__42ff__b4fd__cc46fb1f711c, client, mt_payment_archive, mt_transaction_main, mt_ts_archive, mv_client_top_wins, payment_sum_by_hour, test_table, transaction_payment, sub_vendor_test, payment_archive_rb
+client, mt_payment_archive, mt_ts_archive, mv_client_top_wins, payment_sum_by_hour
 `
