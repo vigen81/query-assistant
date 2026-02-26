@@ -72,15 +72,9 @@ func (s *QueryService) ProcessQuery(ctx context.Context, req *models.QueryReques
 		"apply_pagination": applyPagination,
 	}).Info("Processing query request")
 
-	// Get database schema
-	schemaInfo, err := s.schemaRepo.GetDatabaseSchema(ctx)
-	if err != nil {
-		s.logger.WithError(err).Error("Failed to get database schema")
-		return nil, fmt.Errorf("failed to get database schema: %w", err)
-	}
-
-	// Generate SQL query using OpenAI
-	generatedSQL, err := s.openaiClient.GenerateQuery(ctx, req.Prompt, schemaInfo, req.SiteID)
+	// Generate SQL query using OpenAI with Semantic Dictionary
+	// (schema context is now provided by the dictionary, not by live DB introspection)
+	generatedSQL, err := s.openaiClient.GenerateQuery(ctx, req.Prompt, req.SiteID)
 	if err != nil {
 		s.logger.WithError(err).Error("Failed to generate SQL query")
 		return nil, fmt.Errorf("failed to generate SQL query: %w", err)
