@@ -113,7 +113,6 @@ func (c *Client) GenerateQuery(ctx context.Context, prompt string, siteID int64)
 // semantic dictionary constants selected for the current environment (POD_ENV).
 func (c *Client) buildSemanticDictionaryMessages(prompt string, siteID int64) []openai.ChatCompletionMessage {
 	env := os.Getenv("POD_ENV")
-	c.logger.WithField("POD_ENV", env).Info("Building semantic dictionary messages")
 
 	// 1. System prompt — behavioural rules
 	systemPrompt := GetSystemPrompt()
@@ -124,10 +123,29 @@ func (c *Client) buildSemanticDictionaryMessages(prompt string, siteID int64) []
 	// 3. DDL schema — column-level types
 	ddlSchema := GetDDLSchema()
 
+	c.logger.WithFields(logrus.Fields{
+		"POD_ENV":           env,
+		"semantic_version":  GetSemanticVersion(),
+		"system_prompt_len": len(systemPrompt),
+		"semantic_dict_len": len(semanticDictionary),
+		"ddl_schema_len":    len(ddlSchema),
+		"is_prod":           isProdEnv(),
+	}).Info("Building semantic dictionary messages")
+
 	// Inject site_id into the system prompt
 	systemPrompt = strings.ReplaceAll(systemPrompt, "{site_id}", fmt.Sprintf("%d", siteID))
 
-	// Build the three context messages + user prompt
+	// Combine dictionary + DDL into a single system context to reduce message count
+	// (some models handle fewer, larger messages better than many small ones)
+	var dictionaryContext string
+	if len(ddlSchema) > 0 {
+		dictionaryContext = fmt.Sprintf("%s\n\n---\n\n%s", semanticDictionary, ddlSchema)
+	} else {
+		c.logger.Warn("DDL schema is empty — sending dictionary without DDL")
+		dictionaryContext = semanticDictionary
+	}
+
+	// Build messages: 1 system (rules) + 1 system (dictionary+DDL) + 1 user
 	messages := []openai.ChatCompletionMessage{
 		{
 			Role:    openai.ChatMessageRoleSystem,
@@ -135,15 +153,11 @@ func (c *Client) buildSemanticDictionaryMessages(prompt string, siteID int64) []
 		},
 		{
 			Role:    openai.ChatMessageRoleSystem,
-			Content: semanticDictionary,
-		},
-		{
-			Role:    openai.ChatMessageRoleSystem,
-			Content: ddlSchema,
+			Content: dictionaryContext,
 		},
 		{
 			Role:    openai.ChatMessageRoleUser,
-			Content: prompt,
+			Content: fmt.Sprintf("Generate SQL for site_id = %d: %s", siteID, prompt),
 		},
 	}
 
