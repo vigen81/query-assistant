@@ -1,6 +1,10 @@
 package openai
 
-import "os"
+import (
+	"os"
+
+	"gitlab.smartbet.am/golang/query-assistant/internal/logger"
+)
 
 // =============================================================================
 // SEMANTIC DICTIONARY — ENVIRONMENT ROUTER
@@ -51,5 +55,6 @@ func GetDDLSchema() string {
 // isProdEnv returns true if the current environment is production or staging.
 func isProdEnv() bool {
 	env := os.Getenv("POD_ENV")
+	logger.Log.Info("POD_ENV: ", env)
 	return env == "prod" || env == "staging"
 }
