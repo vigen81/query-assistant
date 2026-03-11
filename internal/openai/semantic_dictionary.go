@@ -1,60 +1,52 @@
 package openai
 
-import (
-	"os"
+import "os"
 
-	"gitlab.smartbet.am/golang/query-assistant/internal/logger"
+// semantic_dictionary.go
+// Public API for semantic dictionary and system prompt.
+// Routes to prod or dev constants based on POD_ENV.
+//
+// Prod  → system prompt v1.1.0  |  semantic dictionary v1.1.3
+// Dev   → system prompt v1.2.x  |  semantic dictionary v1.2.2
+
+const (
+	prodSemanticVersion = "v1.1.3"
+	devSemanticVersion  = "v1.2.2"
 )
 
-// =============================================================================
-// SEMANTIC DICTIONARY — ENVIRONMENT ROUTER
-// =============================================================================
-// Routes to the correct semantic dictionary version based on POD_ENV:
-//   - dev / local  → v1.2.2 (semantic_dictionary_dev.go)
-//   - staging      → v1.0.0 (semantic_dictionary_prod.go)  — same as prod for now
-//   - prod         → v1.0.0 (semantic_dictionary_prod.go)
-//
-// Files:
-//   semantic_dictionary.go      — this file (router)
-//   semantic_dictionary_dev.go  — dev constants (v1.2.2)
-//   semantic_dictionary_prod.go — prod constants (v1.0.0)
-// =============================================================================
-
-// GetSemanticVersion returns the dictionary version for the current environment.
-func GetSemanticVersion() string {
-	if isProdEnv() {
-		return ProdSemanticVersion
-	}
-	return DevSemanticVersion
+func isProdEnv() bool {
+	return os.Getenv("POD_ENV") == "prod"
 }
 
 // GetSystemPrompt returns the system prompt for the current environment.
 func GetSystemPrompt() string {
 	if isProdEnv() {
-		return ProdSystemPrompt
+		return prodSystemPrompt
 	}
-	return DevSystemPrompt
+	return devSystemPrompt
 }
 
 // GetSemanticDictionary returns the semantic dictionary for the current environment.
 func GetSemanticDictionary() string {
 	if isProdEnv() {
-		return ProdSemanticDictionary
+		return prodSemanticDictionary
 	}
-	return DevSemanticDictionary
+	return devSemanticDictionary
 }
 
 // GetDDLSchema returns the DDL schema for the current environment.
+// DDL is disabled in prod (returns empty string).
 func GetDDLSchema() string {
 	if isProdEnv() {
-		return "" //ProdDDLSchema
+		return ""
 	}
-	return DevDDLSchema
+	return devDDLSchema
 }
 
-// isProdEnv returns true if the current environment is production or staging.
-func isProdEnv() bool {
-	env := os.Getenv("POD_ENV")
-	logger.Log.Info("POD_ENV: ", env)
-	return env == "prod" || env == "staging"
+// GetSemanticVersion returns the semantic dictionary version for the current environment.
+func GetSemanticVersion() string {
+	if isProdEnv() {
+		return prodSemanticVersion
+	}
+	return devSemanticVersion
 }
