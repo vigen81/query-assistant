@@ -67,7 +67,6 @@ func (c *Client) GenerateQuery(ctx context.Context, prompt string, siteID int64)
 			Model:               model,
 			Messages:            messages,
 			MaxCompletionTokens: c.config.OpenAI.MaxTokens,
-			Temperature:         c.config.OpenAI.Temperature,
 		},
 	)
 
