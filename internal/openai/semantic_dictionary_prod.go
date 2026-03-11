@@ -1,30 +1,34 @@
 package openai
 
-// =============================================================================
-// SEMANTIC DICTIONARY — PROD v1.1.0  (System Prompt v1.0.1)
-// =============================================================================
+// semantic_dictionary_prod.go
+// System Prompt       : v1.1.0
+// Semantic Dictionary : v1.1.3 (enterprise)
+// Environment         : prod (POD_ENV=prod)
+//
+// ⚠ DO NOT EDIT MANUALLY — generated from:
+//   SYSTEM_PROMPT___LIVE_AI_REPORTING_v1_1_0.docx
+//   live_dictionary_enterprise_v1_1_3.xlsx
 
-const ProdSemanticVersion = "1.1.0"
-
-// ProdSystemPrompt contains the production behavioural instructions (v1.0.1).
-const ProdSystemPrompt = `
-# SYSTEM PROMPT   LIVE AI REPORTING v1.0.0
-
-# You are an AI assistant for an iGaming Back Office reporting system.
+const prodSystemPrompt = `You are an AI SQL generation engine for an enterprise iGaming Back Office reporting system.
 Your ONLY responsibility is to output EITHER:
 (A) a SINGLE, SAFE, READ-ONLY SQL SELECT query for ClickHouse
 OR
-(B) one of the EXACT predefined sentences in Sections 2 or 3 (and nothing else).
+(B) one of the EXACT predefined sentences in Section 2 or 3.
+No other output is allowed.
+This System Prompt defines behavioral rules only.
+Business meaning, schema rules, time columns, joins, exclusions, and metric formulas are defined exclusively in the Semantic Dictionary.
+System Prompt versioning is independent from Semantic Dictionary versioning.
 
-## OBEDIENCE MODE (CRITICAL)
+OBEDIENCE MODE (CRITICAL)
 Follow instructions strictly.
 Do NOT guess.
 Do NOT infer beyond the Semantic Dictionary.
 Do NOT optimize or reinterpret user intent.
 If required data cannot be resolved → FAIL FAST (Section 3).
-Dictionary remains the business authority.
+Dictionary is the single business and schema authority.
+Obedience > Intelligence.
 
-## 1) ABSOLUTE OUTPUT RULES (NON-NEGOTIABLE)
+1) ABSOLUTE OUTPUT RULES (NON-NEGOTIABLE)
 Output MUST be:
 a single raw SQL SELECT statement
 OR
@@ -35,1765 +39,1654 @@ NO comments
 NO JSON
 NO formatting
 NO multiple queries
-
-### SQL Restrictions
+SQL Restrictions:
 SELECT ONLY
 NO INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE
 NO system tables
 NO CROSS JOIN
-Always include LIMIT 1000 unless user explicitly requests another limit
+Always include LIMIT 1000
+EXCEPT for leaderboard/top-N intents where default LIMIT = 20
+If user explicitly specifies LIMIT → use that value.
 
-## 2) OFF-TOPIC OR UNSUPPORTED REQUEST
+2) OFF-TOPIC OR UNSUPPORTED REQUEST
 If the request cannot be converted into SQL using ONLY the Semantic Dictionary
 OR no valid join path exists:
 Output EXACTLY:
 I can only generate reports. Please ask me a data reporting question.
+Do NOT output partial SQL or best-effort guesses when rejecting.
 
-## 3) CLARIFICATION REQUIRED (AMBIGUOUS REQUEST)
+3) CLARIFICATION REQUIRED (AMBIGUOUS REQUEST)
 If the request is reporting-related but ambiguous AND the Semantic Dictionary requires clarification:
-Output EXACTLY:
-Clarification required: Please rewrite your request and specify exactly one <CANONICAL_KIND> from: <CANDIDATE_ID_LIST>.
+Output EXACTLY in the following format:
+Clarification required: Please rewrite your request and specify exactly one {metric_id|dimension_id|preset_id} from: [id1,id2,id3].
 Rules:
-<CANONICAL_KIND> must be one of: metric_id, dimension_id, preset_id
-<CANDIDATE_ID_LIST> must contain only dictionary-defined IDs
-Clarify only ONE ambiguity using this priority:
+Clarify only ONE ambiguity.
+Priority order:
 metric
 preset (date)
 dimension
-Do NOT generate SQL in this case
+Candidate list must contain ONLY dictionary-defined IDs.
+Output must be a single line.
+Do NOT generate SQL in this case.
 
-## 4) DICTIONARY COMPLIANCE (MANDATORY)
-Use ONLY entities defined in the Semantic Dictionary (tables, columns, joins, metrics, aliases).
+4) DICTIONARY COMPLIANCE (MANDATORY)
+Use ONLY entities defined in the Semantic Dictionary:
+tables
+columns
+joins
+metrics
+presets
+aliases
 Do NOT invent tables, columns, joins, filters, flags, or status meanings.
 Metric formulas MUST match Metrics.formula_clickhouse exactly.
-Do NOT simplify or rewrite formulas.
-Use Semantic_Aliases mappings exactly (including defaults and locked behaviors).
+Do NOT rewrite, simplify, or optimize metric formulas.
+Use Semantic_Aliases exactly.
+If a requested field is not defined in dictionary → use Section 2.
+The Dictionary is the single source of truth for:
+fact table classification
+time column selection
+settlement behavior
+status logic
+excluded columns
+allowed joins
+tenant enforcement metadata
 
-## 5) TENANT ISOLATION (MANDATORY)
+5) TENANT ISOLATION (MANDATORY)
 Always include tenant filter:
 site_id = {site_id}
 Rules:
-Apply it at minimum to the PRIMARY FACT table used in the query.
-If joined tables also have site_id, prefer joining with site_id equality when dictionary indicates enforce_site_match.
+Apply it at minimum to the PRIMARY FACT table.
+If joined tables include site_id and dictionary enforces site match → join on site_id equality.
 Never generate cross-site queries.
-6) FACT TABLE DEFAULTS & LIVE DDL PINNING (APPLY ONLY WHEN RELEVANT)
-Fact table mapping:
-• Gaming metrics (bets, wins, GGR, NGR, margin from gaming)
-→ mt_transaction_main
-• Payment metrics (deposits, withdrawals, FTD, payment counts)
-→ mt_payment_archive
-Never use any other fact table.
-Never mix fact tables unless dictionary explicitly defines the relationship.
-If combining gaming and payment metrics:
-• Aggregate each fact table independently first.
-• Do NOT join raw fact tables before aggregation.
-• Do NOT multiply row counts.
+Never apply tenant filter only inside a subquery and omit it from final scope.
 
-### 6.1 Bets & Wins (mt_transaction_main)
-Canonical fact for bets & wins in AI Reporting (use mt_transaction_main only).
-Default exclusions:
-is_test = 0
-is_rollback = 0
-Enum anomaly (LIVE DDL):
-Column type contains values:
-'bet'
-'win'
-'' (empty value mapped to 0)
+6) FACT TABLE SELECTION (STRICT)
+Fact table selection is determined ONLY by metric definitions in the Semantic Dictionary.
 Rules:
-NEVER filter or group by type = ''.
-Only valid analytical values: 'bet' and 'win'.
+Do NOT choose fact tables manually.
+Do NOT mix fact tables unless explicitly allowed by dictionary.
+If request includes metrics from different fact tables:
+Aggregate each fact independently.
+Join only after aggregation at compatible grain.
+If grain alignment cannot be resolved deterministically → Section 3 clarification.
+When resolving a metric_id, always use Metrics.fact_table exactly as the primary FROM table. Never substitute alternative fact tables.
+Never join raw fact tables before aggregation.
+Never multiply row counts.
 
-### 6.2 Deposits & Withdrawals (mt_payment_archive)
-Canonical fact for deposits & withdrawals in AI Reporting (use mt_payment_archive only).
-Primary fact table for payments:
-mt_payment_archive
-Default exclusions (if these columns exist on this fact table):
-is_test = 0
-Success rule (LOCKED by dictionary/business):
-For “successful deposits/withdrawals” KPIs, use: status IN (1,2)
-Settlement rule (LOCKED by dictionary/business):
-For settlement-based metrics, use settled_at_dt as the time column when available.
-Do NOT assume any other status values.
-
-## 7) DATE HANDLING
+7) DATE HANDLING
 Map date phrases using Semantic_Aliases.
-Date_Presets contain descriptions only.
-You must generate valid ClickHouse date filters.
-Choose the correct time column based on dictionary metadata and LIVE DDL types.
-Time column priority:
-*_dt (DateTime / DateTime64)
-created_at (Date / DateTime)
-*_ts (UInt64 / UInt32 epoch)
-Settlement exception:
-If the metric is settlement-based (dictionary says so), prefer settled_at_dt.
+• Date_Presets contain descriptions only.
+• Generate valid ClickHouse filters using dictionary-defined time columns.
 
-### Type-Safe Filtering
-If time column type is:
-Date
-→ time_col >= toDate(...) AND time_col < toDate(...)
-DateTime / DateTime64
-→ time_col >= toStartOf...() AND time_col < toStartOf...()
-UInt32 / UInt64 epoch
-→ compare using toUnixTimestamp(toDateTime(...)) or convert epoch to DateTime safely
+• Time column selection (deterministic):
+  o Use the table's primary_time_column from Tables.time_column_hints.
+  o If primary_time_column is not defined → default to created_at.
+  o Use datetime_time_column (e.g., created_at_dt) ONLY when the user explicitly requests hourly or time-of-day granularity.
+  o Use settlement time columns (e.g., settled_at / settled_at_dt) ONLY when the user explicitly requests settlement-based reporting.
+
+• Canonical date preset mapping (use the selected primary time column):
+  o today → column = today()
+  o yesterday → column = yesterday()
+  o last 7 days → column >= today() - 7
+  o last 30 days → column >= today() - 30
+
+• Do NOT use now() or INTERVAL unless hourly/time-of-day granularity is explicitly requested.
+
+• If the user implies a time period → include a date filter.
+• Date filters must be applied to the primary fact table when a fact table exists in the query.
+• If no time period is provided → do NOT assume one unless a dictionary default preset exists.
 Never compare non-date columns to dates.
-If user implies a time period → include date filter.
-If no time period is provided → do NOT assume one unless dictionary default preset exists.
 
-## 8) BUSINESS TERM RESOLUTION (STRICT)
+8) BUSINESS TERM RESOLUTION (STRICT)
 Resolve ALL business terms through Semantic_Aliases.
 If alias requires clarification → apply Section 3.
 If alias has default_id → use it.
-Do NOT manually rebuild KPI meaning from user text.
+Do NOT manually reconstruct KPI meaning.
 When a metric_id is chosen:
 Use formula_clickhouse exactly from the dictionary.
-Do NOT change it.
-Important locked behavior:
-If the dictionary locks “FTD” as “FTD List”, treat “FTD” exactly as the dictionary default (do not convert into count/amount unless user explicitly requests “FTD count” or “FTD amount”).
-If user says “top players” / “top player” and no metric is specified, default metric_id = bets_amount (rank players by bet amount).
-This must generate a per-player aggregation (GROUP BY client_id, username), ORDER BY bets_amount DESC, and apply LIMIT (default 20 if not specified).
+Do NOT modify it.
+Leaderboard Behavior
+If user says "top players" / "top player" and no metric is specified:
+Default metric_id = bets_amount.
+Generate per-player aggregation:
+GROUP BY client_id, username
+ORDER BY metric DESC
+LIMIT 20 (unless specified otherwise)
+Multi-Metric Requests
+If user explicitly requests multiple metrics:
+Include all requested metric_ids.
+All metrics must be dictionary-defined.
+If metrics belong to different fact tables:
+Aggregate independently.
+Join at matching grain.
+If ordering is ambiguous:
+Order by the first explicitly mentioned metric.
+Otherwise use dictionary default.
 
-## 9) PLAYER IDENTITY CONTRACT (LIVE + DICTIONARY ALIGNED)
-Canonical player table:
-m_client
-Canonical join rule (MANDATORY when joining player identity):
+9) PLAYER IDENTITY CONTRACT
+Canonical player table: m_client
+Canonical join rule:
 fact.client_id = m_client.id
 AND fact.site_id = m_client.site_id
-PLAYER-LEVEL query definition:
 A query is PLAYER-LEVEL if it:
-returns one row per player, OR
-selects client_id, OR
-groups by client_id
+returns one row per player
+OR selects client_id
+OR groups by client_id
 When PLAYER-LEVEL:
-Always return player identifier as TEXT:
-toString(fact.client_id) AS client_id
-Always return:
-m_client.username AS username
+Always return: toString(fact.client_id) AS client_id
+Always return: m_client.username AS username
 Never aggregate identifiers.
 Never return numeric client_id.
 If canonical join cannot be formed using dictionary joins:
-Return only toString(fact.client_id) AS client_id
-Do NOT invent join conditions.
+Return only: toString(fact.client_id) AS client_id
+Do NOT invent joins.
 
-## 10) PII & RBAC
+10) PII & RBAC
 Do NOT implement masking or RBAC logic in SQL.
 Backend validation is authoritative.
-Include PII fields only if explicitly requested AND defined in dictionary.
+Include PII fields only if:
+explicitly requested
+AND defined in dictionary
 
-## 12) FINAL VALIDATION BEFORE OUTPUT
+11) FINAL VALIDATION BEFORE OUTPUT
 Ensure:
 Valid ClickHouse syntax
 Single SELECT only
 Includes site_id = {site_id}
-Includes LIMIT 1000 (unless user requested otherwise)
+Includes correct LIMIT rule
 Uses only dictionary-defined entities
-Applies relevant fact defaults (Section 6)
-Never uses type = '' for bets/wins
 Uses dictionary metric formulas exactly
+Obeys fact aggregation rules
 Output is either:
 one SQL SELECT
-OR
-one exact predefined sentence from Section 2 or 3
+OR one exact predefined sentence from Section 2 or 3
 
-# SYSTEM MODE
+SYSTEM MODE
 You are not an analyst.
 You are not an assistant.
 You are a deterministic SQL compiler.
-Obedience > Intelligence.
-`
+Obedience > Intelligence.`
 
-// ProdSemanticDictionary is the production source of truth (v1.1.0).
-const ProdSemanticDictionary = `
-# SEMANTIC DICTIONARY — LIVE ENTERPRISE v1.1.0
+const prodSemanticDictionary = `## TABLES
+[table_id=mt_payment_archive]
+  name=Deposit/Withdraw Transactions
+  description=finalized deposit and withdrawal transactions for financial reporting and KPI calculation.
+  grain=One row per payment transaction
+  enforce_site_match=YES
+  status=IN_SCOPE
+  has_deleted_flag=NO
+  time_column_hints=primary_time_column: created_at; datetime_time_column: created_at_dt; settlement_time_column: settled_at; settlement_datetime_time_column: settled_at_dt; updated_time_column: updated_at; updated_datetime_time_column: updated_at_dt; epoch_time_columns: created_at_ts,settled_at_ts,updated_at_ts
+[table_id=client]
+  name=Legacy Client Table
+  description=legacy player identity data mirrored from previous systems.
+  grain=Unknown
+  enforce_site_match=NO
+  status=IN_SCOPE
+  has_deleted_flag=NO
+  time_column_hints=primary_time_column: created_at; deleted_time_column: deleted_at
+[table_id=client_bonus]
+  name=Client Bonuses
+  description=bonus instances assigned to players and their lifecycle state.
+  grain=One row per bonus per client
+  enforce_site_match=NO
+  status=IN_SCOPE
+  has_deleted_flag=NO
+  time_column_hints=primary_time_column: created_at; updated_time_column: updated_at
+[table_id=client_info]
+  name=client_info
+  description=player personal/profile information (PII) linked to player accounts.
+  grain=Table
+  enforce_site_match=NO
+  status=IN_SCOPE
+  has_deleted_flag=YES
+  time_column_hints=
+[table_id=client_product]
+  name=Client Products
+  description=relationships between players and products/verticals they interacted with.
+  grain=One row per client per product
+  enforce_site_match=NO
+  status=IN_SCOPE
+  has_deleted_flag=NO
+  time_column_hints=primary_time_column: updated_at; updated_time_column: updated_at
+[table_id=client_tag_client]
+  name=Client Tags Link
+  description=relationships between players and assigned tags.
+  grain=One row per tag assignment per client
+  enforce_site_match=NO
+  status=IN_SCOPE
+  has_deleted_flag=NO
+  time_column_hints=primary_time_column: created_at; updated_time_column: updated_at
+[table_id=client_tags]
+  name=client_tags
+  description=player tag definitions and metadata per site.
+  grain=Table
+  enforce_site_match=YES
+  status=IN_SCOPE
+  has_deleted_flag=YES
+  time_column_hints=primary_time_column: created_at; updated_time_column: updated_at
+[table_id=country]
+  name=country
+  description=country reference data used for player profiles and localization.
+  grain=Table
+  enforce_site_match=NO
+  status=IN_SCOPE
+  has_deleted_flag=YES
+  time_column_hints=
+[table_id=currency]
+  name=Currency
+  description=currency identifiers and ISO codes used across the platform.
+  grain=One row per currency
+  enforce_site_match=NO
+  status=IN_SCOPE
+  has_deleted_flag=NO
+  time_column_hints=deleted_time_column: deleted_at
+[table_id=exchange]
+  name=Exchange / Rates
+  description=site-specific currency exchange rates and currency metadata.
+  grain=One row per currency per site
+  enforce_site_match=YES
+  status=IN_SCOPE
+  has_deleted_flag=NO
+  time_column_hints=primary_time_column: created_at; updated_time_column: updated_at; deleted_time_column: deleted_at
+[table_id=game]
+  name=Game Reference
+  description=generic game catalog metadata across vendors/providers.
+  grain=One row per game
+  enforce_site_match=NO
+  status=IN_SCOPE
+  has_deleted_flag=NO
+  time_column_hints=primary_time_column: created_at; updated_time_column: updated_at
+[table_id=game_tag]
+  name=game_tag
+  description=game_tag data used by the platform.
+  grain=Table
+  enforce_site_match=NO
+  status=IN_SCOPE
+  has_deleted_flag=YES
+  time_column_hints=
+[table_id=m_client]
+  name=Client Table
+  description=canonical player identity data used in reporting (player id and username).
+  grain=One row per player
+  enforce_site_match=YES
+  status=IN_SCOPE
+  has_deleted_flag=YES
+  time_column_hints=primary_time_column: created_at; deleted_time_column: deleted_at
+[table_id=m_client_bonus]
+  name=m_client_bonus
+  description=canonical bonus instances assigned to players and their lifecycle state.
+  grain=Dimension
+  enforce_site_match=NO
+  status=IN_SCOPE
+  has_deleted_flag=NO
+  time_column_hints=primary_time_column: created_at; updated_time_column: updated_at
+[table_id=m_client_info]
+  name=m_client_info
+  description=canonical player personal/profile information (PII) linked to player accounts.
+  grain=Dimension
+  enforce_site_match=NO
+  status=IN_SCOPE
+  has_deleted_flag=NO
+  time_column_hints=
+[table_id=m_client_last_bonus_claims]
+  name=m_client_last_bonus_claims
+  description=canonical client last bonus claims reference data mirrored from the source system.
+  grain=Dimension
+  enforce_site_match=NO
+  status=IN_SCOPE
+  has_deleted_flag=NO
+  time_column_hints=primary_time_column: updated_at; updated_time_column: updated_at
+[table_id=m_client_product]
+  name=m_client_product
+  description=canonical relationships between players and products/verticals they interacted with.
+  grain=Dimension
+  enforce_site_match=NO
+  status=IN_SCOPE
+  has_deleted_flag=NO
+  time_column_hints=primary_time_column: updated_at; updated_time_column: updated_at
+[table_id=m_client_tag_client]
+  name=m_client_tag_client
+  description=canonical relationships between players and assigned tags.
+  grain=Mapping
+  enforce_site_match=NO
+  status=IN_SCOPE
+  has_deleted_flag=NO
+  time_column_hints=primary_time_column: created_at; updated_time_column: updated_at
+[table_id=m_client_tags]
+  name=m_client_tags
+  description=canonical player tag definitions and metadata per site.
+  grain=Dimension
+  enforce_site_match=YES
+  status=IN_SCOPE
+  has_deleted_flag=NO
+  time_column_hints=primary_time_column: created_at; updated_time_column: updated_at
+[table_id=m_country]
+  name=m_country
+  description=canonical country reference data used for player profiles and localization.
+  grain=Dimension
+  enforce_site_match=NO
+  status=IN_SCOPE
+  has_deleted_flag=NO
+  time_column_hints=
+[table_id=m_currency]
+  name=m_currency
+  description=canonical currency identifiers and ISO codes used across the platform.
+  grain=Dimension
+  enforce_site_match=NO
+  status=IN_SCOPE
+  has_deleted_flag=NO
+  time_column_hints=deleted_time_column: deleted_at
+[table_id=m_exchange]
+  name=m_exchange
+  description=canonical site-specific currency exchange rates and currency metadata.
+  grain=Dimension
+  enforce_site_match=NO
+  status=IN_SCOPE
+  has_deleted_flag=NO
+  time_column_hints=primary_time_column: created_at; updated_time_column: updated_at; deleted_time_column: deleted_at
+[table_id=m_game]
+  name=m_game
+  description=canonical generic game catalog metadata across vendors/providers.
+  grain=Dimension
+  enforce_site_match=NO
+  status=IN_SCOPE
+  has_deleted_flag=NO
+  time_column_hints=primary_time_column: created_at; updated_time_column: updated_at
+[table_id=m_game_tag]
+  name=m_game_tag
+  description=canonical game tag reference data mirrored from the source system.
+  grain=Dimension
+  enforce_site_match=NO
+  status=IN_SCOPE
+  has_deleted_flag=NO
+  time_column_hints=
+[table_id=m_payment]
+  name=m_payment
+  description=canonical global payment provider definitions and metadata.
+  grain=Dimension
+  enforce_site_match=NO
+  status=IN_SCOPE
+  has_deleted_flag=NO
+  time_column_hints=
+[table_id=m_products]
+  name=m_products
+  description=canonical product/vertical definitions such as casino and sports.
+  grain=Dimension
+  enforce_site_match=NO
+  status=IN_SCOPE
+  has_deleted_flag=NO
+  time_column_hints=
+[table_id=m_segment]
+  name=m_segment
+  description=canonical segment definitions and metadata used by segmentation logic.
+  grain=Dimension
+  enforce_site_match=YES
+  status=IN_SCOPE
+  has_deleted_flag=NO
+  time_column_hints=primary_time_column: created_at; updated_time_column: updated_at
+[table_id=m_segment_client_tmp]
+  name=m_segment_client_tmp
+  description=temporary player membership in segments produced by segmentation logic.
+  grain=Mapping
+  enforce_site_match=NO
+  status=IN_SCOPE
+  has_deleted_flag=NO
+  time_column_hints=
+[table_id=m_site]
+  name=m_site
+  description=canonical site/brand configuration and metadata (tenant information).
+  grain=Dimension
+  enforce_site_match=NO
+  status=IN_SCOPE
+  has_deleted_flag=YES
+  time_column_hints=primary_time_column: created_at; updated_time_column: updated_at; deleted_time_column: deleted_at
+[table_id=m_site_bonus]
+  name=m_site_bonus
+  description=canonical site bonus reference data mirrored from the source system.
+  grain=Dimension
+  enforce_site_match=YES
+  status=IN_SCOPE
+  has_deleted_flag=YES
+  time_column_hints=primary_time_column: created_at; updated_time_column: updated_at; deleted_time_column: deleted_at
+[table_id=m_site_game]
+  name=m_site_game
+  description=canonical site-specific game metadata and internal game mappings.
+  grain=Dimension
+  enforce_site_match=YES
+  status=IN_SCOPE
+  has_deleted_flag=YES
+  time_column_hints=primary_time_column: created_at; updated_time_column: updated_at; deleted_time_column: deleted_at
+[table_id=m_site_game_site_tag]
+  name=m_site_game_site_tag
+  description=canonical relationships between site games and site tags.
+  grain=Dimension
+  enforce_site_match=NO
+  status=IN_SCOPE
+  has_deleted_flag=NO
+  time_column_hints=
+[table_id=m_site_payment]
+  name=m_site_payment
+  description=canonical site-level payment method configuration and availability flags.
+  grain=Dimension
+  enforce_site_match=YES
+  status=IN_SCOPE
+  has_deleted_flag=NO
+  time_column_hints=primary_time_column: created_at; updated_time_column: updated_at
+[table_id=m_site_tag]
+  name=m_site_tag
+  description=canonical site-level tag definitions used for games and segmentation.
+  grain=Dimension
+  enforce_site_match=YES
+  status=IN_SCOPE
+  has_deleted_flag=NO
+  time_column_hints=
+[table_id=m_site_vendor]
+  name=m_site_vendor
+  description=canonical relationships between vendors and sites including main configuration flags.
+  grain=Dimension
+  enforce_site_match=YES
+  status=IN_SCOPE
+  has_deleted_flag=NO
+  time_column_hints=
+[table_id=m_sub_vendor]
+  name=m_sub_vendor
+  description=canonical sub-vendor/studio reference data per site/vendor.
+  grain=Dimension
+  enforce_site_match=YES
+  status=IN_SCOPE
+  has_deleted_flag=NO
+  time_column_hints=primary_time_column: created_at; updated_time_column: updated_at
+[table_id=m_vendor]
+  name=m_vendor
+  description=canonical vendor/provider reference data used for games and reporting.
+  grain=Dimension
+  enforce_site_match=NO
+  status=IN_SCOPE
+  has_deleted_flag=NO
+  time_column_hints=
+[table_id=mt_transaction_main]
+  name=Bet/Win Transactions
+  description=Canonical fact table for bets & wins.
+  grain=One row per bet/win
+  enforce_site_match=YES
+  status=IN_SCOPE
+  has_deleted_flag=YES
+  time_column_hints=primary_time_column: created_at; datetime_time_column: created_at_dt; epoch_time_columns: created_at_ts
+[table_id=mt_ts_archive]
+  name=mt_ts_archive
+  description=technical timestamp/state for incremental synchronization jobs.
+  grain=Table
+  enforce_site_match=NO
+  status=IN_SCOPE
+  has_deleted_flag=NO
+  time_column_hints=
+[table_id=mv_client_top_wins]
+  name=mv_client_top_wins
+  description=precomputed top wins per player for fast reporting.
+  grain=Aggregated view
+  enforce_site_match=NO
+  status=IN_SCOPE
+  has_deleted_flag=NO
+  time_column_hints=primary_time_column: created_at
+[table_id=payment]
+  name=payment
+  description=global payment provider definitions and metadata.
+  grain=Table
+  enforce_site_match=NO
+  status=IN_SCOPE
+  has_deleted_flag=YES
+  time_column_hints=
+[table_id=payment_sum_by_hour]
+  name=payment_sum_by_hour
+  description=aggregated payment statistics by hour for fast reporting.
+  grain=Payment
+  enforce_site_match=NO
+  status=IN_SCOPE
+  has_deleted_flag=NO
+  time_column_hints=primary_time_column: settled_at; settlement_time_column: settled_at
+[table_id=products]
+  name=Products
+  description=product/vertical definitions such as casino and sports.
+  grain=One row per product
+  enforce_site_match=NO
+  status=IN_SCOPE
+  has_deleted_flag=NO
+  time_column_hints=
+[table_id=segment]
+  name=segment
+  description=segment definitions and metadata used by segmentation logic.
+  grain=Table
+  enforce_site_match=YES
+  status=IN_SCOPE
+  has_deleted_flag=YES
+  time_column_hints=primary_time_column: created_at; updated_time_column: updated_at
+[table_id=site]
+  name=site
+  description=site/brand configuration and metadata (tenant information).
+  grain=Table
+  enforce_site_match=NO
+  status=IN_SCOPE
+  has_deleted_flag=YES
+  time_column_hints=primary_time_column: created_at; updated_time_column: updated_at; deleted_time_column: deleted_at
+[table_id=site_bonus]
+  name=site_bonus
+  description=site_bonus data used by the platform.
+  grain=Table
+  enforce_site_match=YES
+  status=IN_SCOPE
+  has_deleted_flag=YES
+  time_column_hints=primary_time_column: created_at; updated_time_column: updated_at; deleted_time_column: deleted_at
+[table_id=site_game]
+  name=Site Games
+  description=site-specific game metadata and internal game mappings.
+  grain=One row per game per site
+  enforce_site_match=YES
+  status=IN_SCOPE
+  has_deleted_flag=YES
+  time_column_hints=primary_time_column: created_at; updated_time_column: updated_at; deleted_time_column: deleted_at
+[table_id=site_game_site_tag]
+  name=Game Tags Link
+  description=relationships between site games and site tags.
+  grain=One row per tag assignment per game
+  enforce_site_match=NO
+  status=IN_SCOPE
+  has_deleted_flag=NO
+  time_column_hints=
+[table_id=site_payment]
+  name=Payment Methods
+  description=site-level payment method configuration and availability flags.
+  grain=One row per method
+  enforce_site_match=YES
+  status=IN_SCOPE
+  has_deleted_flag=NO
+  time_column_hints=primary_time_column: created_at; updated_time_column: updated_at
+[table_id=site_tag]
+  name=Site Tags
+  description=site-level tag definitions used for games and segmentation.
+  grain=One row per tag per site
+  enforce_site_match=YES
+  status=IN_SCOPE
+  has_deleted_flag=NO
+  time_column_hints=
+[table_id=site_vendor]
+  name=site_vendor
+  description=relationships between vendors and sites including main configuration flags.
+  grain=Table
+  enforce_site_match=YES
+  status=IN_SCOPE
+  has_deleted_flag=YES
+  time_column_hints=
+[table_id=sub_vendor]
+  name=Sub Vendors
+  description=sub-vendor/studio reference data per site/vendor.
+  grain=One row per studio
+  enforce_site_match=YES
+  status=IN_SCOPE
+  has_deleted_flag=NO
+  time_column_hints=primary_time_column: created_at; updated_time_column: updated_at
+[table_id=vendor]
+  name=vendor
+  description=vendor/provider reference data used for games and reporting.
+  grain=Table
+  enforce_site_match=NO
+  status=IN_SCOPE
+  has_deleted_flag=YES
+  time_column_hints=
 
-## 1. TABLES
-
-### 1.1 IN-SCOPE TABLES
-
-| table_id | table_name | engine | description | enforce_site_match | has_deleted_flag |
-|----------|-----------|--------|-------------|-------------------|------------------|
-| mt_payment_archive | Deposit/Withdraw Transactions | ReplacingMergeTree | Stores finalized deposit and withdrawal transactions for financial reporting and | YES | NO |
-| currency | Currency | MySQL | Stores currency identifiers and ISO codes used across the platform. | NO | NO |
-| m_client | Client Table | MySQL | Stores canonical player identity data used in reporting (player id and username) | YES | YES |
-| m_currency | m_currency | ClickHouse | Stores canonical currency identifiers and ISO codes used across the platform. | NO | NO |
-| m_products | m_products | ClickHouse | Stores canonical product/vertical definitions such as casino and sports. | NO | NO |
-| m_segment_client_tmp | m_segment_client_tmp | ClickHouse | Stores temporary player membership in segments produced by segmentation logic. | NO | NO |
-| m_site | m_site | ClickHouse | Stores canonical site/brand configuration and metadata (tenant information). | NO | YES |
-| m_site_game | m_site_game | ClickHouse | Stores canonical site-specific game metadata and internal game mappings. | YES | YES |
-| m_site_payment | m_site_payment | ClickHouse | Stores canonical site-level payment method configuration and availability flags. | YES | NO |
-| m_sub_vendor | m_sub_vendor | ClickHouse | Stores canonical sub-vendor/studio reference data per site/vendor. | YES | NO |
-| m_vendor | m_vendor | ClickHouse | Stores canonical vendor/provider reference data used for games and reporting. | NO | NO |
-| mt_transaction_main | Bet/Win Transactions | MergeTree | Canonical fact table for bets & wins. | YES | YES |
-| products | Products | MySQL | Stores product/vertical definitions such as casino and sports. | NO | NO |
-| segment | segment | ClickHouse | Stores segment definitions and metadata used by segmentation logic. | YES | YES |
-| site | site | ClickHouse | Stores site/brand configuration and metadata (tenant information). | NO | YES |
-| site_bonus | site_bonus | ClickHouse | Stores site_bonus data used by the platform. | YES | YES |
-| site_game | Site Games | MySQL | Stores site-specific game metadata and internal game mappings. | YES | YES |
-| site_payment | Payment Methods | MySQL | Stores site-level payment method configuration and availability flags. | YES | NO |
-| sub_vendor | Sub Vendors | MySQL | Stores sub-vendor/studio reference data per site/vendor. | YES | NO |
-| vendor | vendor | ClickHouse | Stores vendor/provider reference data used for games and reporting. | NO | YES |
-
-### 1.2 IN-SCOPE (PHASE 2) TABLES — DO NOT USE YET
-
-| table_id | table_name | engine | description |
-|----------|-----------|--------|-------------|
-| client_bonus | Client Bonuses | MySQL | Stores bonus instances assigned to players and their lifecyc |
-| client_info | client_info | ClickHouse | Stores player personal/profile information (PII) linked to p |
-| client_product | Client Products | MySQL | Stores relationships between players and products/verticals  |
-| client_tag_client | Client Tags Link | MySQL | Stores relationships between players and assigned tags. |
-| client_tags | client_tags | ClickHouse | Stores player tag definitions and metadata per site. |
-| country | country | ClickHouse | Stores country reference data used for player profiles and l |
-| exchange | Exchange / Rates | MySQL | Stores site-specific currency exchange rates and currency me |
-| game | Game Reference | MySQL | Stores generic game catalog metadata across vendors/provider |
-| game_tag | game_tag | ClickHouse | Stores game_tag data used by the platform. |
-| m_client_bonus | m_client_bonus | ClickHouse | Stores canonical bonus instances assigned to players and the |
-| m_client_info | m_client_info | ClickHouse | Stores canonical player personal/profile information (PII) l |
-| m_client_last_bonus_claims | m_client_last_bonus_claims | ClickHouse | Stores canonical client last bonus claims reference data mir |
-| m_client_product | m_client_product | ClickHouse | Stores canonical relationships between players and products/ |
-| m_client_tag_client | m_client_tag_client | ClickHouse | Stores canonical relationships between players and assigned  |
-| m_client_tags | m_client_tags | ClickHouse | Stores canonical player tag definitions and metadata per sit |
-| m_country | m_country | ClickHouse | Stores canonical country reference data used for player prof |
-| m_exchange | m_exchange | ClickHouse | Stores canonical site-specific currency exchange rates and c |
-| m_game | m_game | ClickHouse | Stores canonical generic game catalog metadata across vendor |
-| m_game_tag | m_game_tag | ClickHouse | Stores canonical game tag reference data mirrored from the s |
-| m_payment | m_payment | ClickHouse | Stores canonical global payment provider definitions and met |
-| m_segment | m_segment | ClickHouse | Stores canonical segment definitions and metadata used by se |
-| m_site_bonus | m_site_bonus | ClickHouse | Stores canonical site bonus reference data mirrored from the |
-| m_site_game_site_tag | m_site_game_site_tag | ClickHouse | Stores canonical relationships between site games and site t |
-| m_site_tag | m_site_tag | ClickHouse | Stores canonical site-level tag definitions used for games a |
-| m_site_vendor | m_site_vendor | ClickHouse | Stores canonical relationships between vendors and sites inc |
-| payment | payment | ClickHouse | Stores global payment provider definitions and metadata. |
-| site_game_site_tag | Game Tags Link | MySQL | Stores relationships between site games and site tags. |
-| site_tag | Site Tags | MySQL | Stores site-level tag definitions used for games and segment |
-| site_vendor | site_vendor | ClickHouse | Stores relationships between vendors and sites including mai |
-
-### 1.3 OUT-OF-SCOPE TABLES (DO NOT USE)
-
-client, mt_payment_archive, mt_ts_archive, mv_client_top_wins, payment_sum_by_hour
-
-## 2. METRICS
-
-### 2.1 Gaming Metrics (fact_table: mt_transaction_main)
-
-| metric_id | name | formula_clickhouse |
-|-----------|------|--------------------|
-| bets_count | Bets Count | countIf(type='bet' AND is_rollback=0 AND is_test=0) |
-| bets_amount | Bets Amount | sumIf(amount, type='bet' AND is_rollback=0 AND is_test=0) |
-| wins_amount | Wins Amount | sumIf(amount, type='win' AND is_rollback=0 AND is_test=0) |
-| ggr | Gross Gaming Revenue | sumIf(amount, type='bet' AND is_rollback=0 AND is_test=0) - sumIf(amount, type='win' AND is_rollback=0 AND is_test=0) |
-| rtp | Return To Player | sumIf(amount, type='win' AND is_rollback=0 AND is_test=0) / NULLIF(sumIf(amount, type='bet' AND is_rollback=0 AND is_test=0),0) |
-| active_players_bets | Active Players (by Bets) | uniqExactIf(client_id, type='bet' AND is_rollback=0 AND is_test=0) |
-| bonus_bets_amount | Bonus Bets Amount | sumIf(amount, type='bet' AND is_bonus=1 AND is_test=0) |
-| bonus_ggr | Bonus GGR | sumIf(amount, type='bet' AND is_bonus=1 AND is_test=0) - sumIf(amount, type='win' AND is_bonus=1 AND is_test=0) |
-| avg_bet | Average Bet Amount | sumIf(amount,type='bet' AND is_rollback=0 AND is_test=0)/NULLIF(countIf(type='bet' AND is_rollback=0 AND is_test=0),0) |
-| ggr_margin | GGR Margin | (sumIf(amount,type='bet' AND is_rollback=0 AND is_test=0)-sumIf(amount,type='win' AND is_rollback=0 AND is_test=0))/NULLIF(sumIf(amount,type='bet' AND is_rollback=0 AND is_test=0),0) |
-| bonus_turnover | Bonus Turnover | sumIf(amount, type='bet' AND is_bonus=1 AND is_rollback=0 AND is_test=0) |
-| bonus_share_of_ggr | Bonus Share of GGR | (sumIf(amount,type='bet' AND is_bonus=1)-sumIf(amount,type='win' AND is_bonus=1)) / NULLIF((sumIf(amount,type='bet')-sumIf(amount,type='win')),0) |
-| ngr | Net Gaming Revenue | (   sumIf(amount, type='bet' AND is_rollback=0)   -   sumIf(amount, type='bet' AND is_rollback=0 AND (is_bonus=1 OR is_test=1)) ) - (   sumIf(amount, type='win' AND is_rollback=0)   -   sumIf(amount, type='win' AND is_rollback=0 AND (is_bonus=1 OR is_test=1)) ) |
-
-### 2.2 Payment Metrics (fact_table: mt_payment_archive)
-
-| metric_id | name | formula_clickhouse |
-|-----------|------|--------------------|
-| deposits_amount | Deposits Amount | sumIf(amount, type='deposit' AND status IN (1,2) AND is_test=0) |
-| withdrawals_amount | Withdrawals Amount | sumIf(amount, type='withdraw' AND status IN (1,2) AND is_test=0) |
-| net_deposits | Net Deposits | (   sumIf(amount, type='deposit' AND status IN (1,2) AND is_test=0) ) - (   sumIf(amount, type='withdraw' AND status IN (1,2) AND is_test=0) ) |
-| ftd_count | First-Time Depositors | uniqExactIf(client_id,   type='deposit'   AND status IN (1,2)   AND is_test=0   AND action_count=1 ) |
-| hold_from_deposits | Hold from Deposits | (sumIf(a.amount,a.type='bet' AND a.is_rollback=0 AND a.is_test=0)-sumIf(a.amount,a.type='win' AND a.is_rollback=0 AND a.is_test=0)) / NULLIF(sumIf(p.amount,p.type='deposit' AND p.status IN (1,2) AND p.is_test=0),0) |
-| unique_depositors | Unique Depositors | uniqExactIf(client_id, type='deposit' AND status IN (1,2) AND is_test=0) |
-| ftd_amount | First-Time Deposit Amount | sumIf(amount,   type='deposit'   AND status IN (1,2)   AND is_test=0   AND action_count=1 ) |
-| ftd_list | FTD List | SELECT   toString(p.client_id) AS client_id,   mc.username AS username,   p.created_at_dt AS first_deposit_date,   p.amount AS first_deposit_amount FROM mt_payment_archive AS p LEFT JOIN m_client AS mc   ON p.client_id = mc.id AND p.site_id = mc.site_id WHERE   p.type = 'deposit'   AND p.status IN (1,2)   AND p.is_test = 0   AND p.action_count = 1 |
-
-### 2.3 Other Metrics
-
-| metric_id | name | fact_table | formula_clickhouse |
-|-----------|------|------------|--------------------|
-| registered_players | Registered Players | m_client | COUNT(DISTINCT id) |
-
-## 3. DIMENSIONS
-
-| dimension_id | name | type | source_tables_columns | lookup_table | display_column | synonyms |
-|--------------|------|------|----------------------|--------------|----------------|----------|
-| date | Date | temporal | mt_transaction_main.created_at_dt; mt_payment_archive.create |  |  | date,day |
-| site | Site | entity | mt_transaction_main.site_id; mt_payment_archive.site_id; m_c | m_site | name | site,brand,operator |
-| currency | Currency | categorical | mt_transaction_main.currency_id; mt_payment_archive.currency | currency | code | currency,ccy |
-| product | Product | entity | mt_transaction_main.product_id; site_game.product_id | products | alias | product,vertical,category |
-| game | Game | entity | mt_transaction_main.internal_site_game_id; site_game.interna | site_game | title | game,title,slot |
-| vendor | Vendor | entity | mt_transaction_main.vendor_id; site_game.vendor_id | m_vendor | title | provider,vendor,game provider |
-| sub_vendor | Sub Vendor | categorical | mt_transaction_main.sub_vendor_id; sub_vendor.id | sub_vendor | title | studio,subvendor |
-| client | Player | entity | mt_transaction_main.client_id; mt_payment_archive.client_id; | m_client | username | player,user,client |
-| payment_method | Payment Method | categorical | mt_payment_archive.site_payment_id | site_payment | name | psp,payment system |
-| is_test_flag | Test Flag | flag | mt_transaction_main.is_test; m_client.is_test; mt_payment_ar |  |  | test,qa |
-| is_bonus_flag | Bonus Flag | flag | mt_transaction_main.is_bonus |  |  | bonus,bonus play |
-| country | Country | categorical | m_client.meta |  | country_name | country,geo,region,jurisdiction |
-| platform | Platform | categorical | mt_transaction_main.meta |  | platform | device,channel,platform |
-| player_tag | Player Tag | entity | client_tag_client.client_tag_id | site_tag | name | tag,label |
-| bonus_type | Bonus Type | categorical | client_bonus.status |  | bonus_type_name | bonus type,bonus category |
-| registration_date | Registration Date | temporal | m_client.created_at |  | registration_date | reg date,signup date |
-
-## 4. JOINS
-
-### 4.1 Core Joins
-
-| from_table | to_table | join_type | on_conditions | cardinality | enforce_site_match |
-|------------|----------|-----------|---------------|-------------|-------------------|
-| mt_transaction_main | m_client | LEFT | mt_transaction_main.client_id = m_client.id AND mt_transaction_main.site_id = m_client.site_id | many_to_one | YES |
-| mt_transaction_main | currency | LEFT | mt_transaction_main.currency_id = currency.id | many_to_one | NO |
-| mt_transaction_main | site_game | LEFT | mt_transaction_main.internal_site_game_id = site_game.internal_game_id AND mt_transaction_main.site_id = site_game.site_id | many_to_one | YES |
-| mt_transaction_main | sub_vendor | LEFT | mt_transaction_main.sub_vendor_id = sub_vendor.id AND mt_transaction_main.site_id = sub_vendor.site_id | many_to_one | YES |
-| mt_payment_archive | m_client | LEFT | mt_payment_archive.client_id = m_client.id AND mt_payment_archive.site_id = m_client.site_id | many_to_one | YES |
-| mt_payment_archive | currency | LEFT | mt_payment_archive.currency_id = currency.id | many_to_one | NO |
-| mt_payment_archive | site_payment | LEFT | mt_payment_archive.site_payment_id = site_payment.id AND mt_payment_archive.site_id = site_payment.site_id | many_to_one | YES |
-| client_bonus | m_client | LEFT | client_bonus.client_id = m_client.id | many_to_one | NO |
-| client_product | m_client | LEFT | client_product.client_id = m_client.id | many_to_one | NO |
-| client_product | products | LEFT | client_product.product_id = products.id | many_to_one | NO |
-| client_tag_client | m_client | LEFT | client_tag_client.client_id = m_client.id | many_to_one | NO |
-| site_game_site_tag | site_game | LEFT | site_game_site_tag.site_game_id = site_game.id | many_to_one | NO |
-| exchange | currency | LEFT | exchange.currency_id = currency.id | many_to_one | NO |
-| mt_transaction_main | exchange | LEFT | mt_transaction_main.currency_id = exchange.currency_id AND mt_transaction_main.site_id = exchange.site_id | many_to_one | YES |
-| mt_payment_archive | exchange | LEFT | mt_payment_archive.currency_id = exchange.currency_id AND mt_payment_archive.site_id = exchange.site_id | many_to_one | YES |
-| mt_payment_archive | m_client | LEFT | mt_payment_mt_transaction_main.client_id = m_client.id AND mt_payment_mt_transaction_main.site_id = m_client.site_id | many_to_one | YES |
-
-### 4.2 Phase 2 Joins
-
-| from_table | to_table | join_type | on_conditions | notes |
-|------------|----------|-----------|---------------|-------|
-| client_tag_client | site_tag | LEFT | client_tag_client.client_tag_id = site_tag.id | Resolve tag names |
-| site_game_site_tag | site_tag | LEFT | site_game_site_tag.site_tag_id = site_tag.id | Resolve game tag names |
-
-## 5. SEMANTIC ALIASES
-
-### 5.1 Direct Mappings
-
-**Metric Aliases:**
-
-- turnover -> bets_amount
-- stakes -> bets_amount
-- active players -> active_players_bets
-- cash in -> deposits_amount
-- cash out -> withdrawals_amount
-- ggr -> ggr
-- gross gaming revenue -> ggr
-- gross revenue from games -> ggr
-- gaming revenue -> ggr
-- game revenue -> ggr
-- house win -> ggr
-- operator win -> ggr
-- gross win -> ggr
-- net gaming revenue -> ngr
-- net revenue from games -> ngr
-- net game revenue -> ngr
-- net win -> ngr
-- operator net revenue -> ngr
-- bet amount -> bets_amount
-- bet volume -> bets_amount
-- betting volume -> bets_amount
-- stakes volume -> bets_amount
-- staking volume -> bets_amount
-- total stakes -> bets_amount
-- total bet amount -> bets_amount
-- bets count -> bets_count
-- number of bets -> bets_count
-- bet count -> bets_count
-- total bets placed -> bets_count
-- wins amount -> wins_amount
-- total wins -> wins_amount
-- total player wins -> wins_amount
-- player winnings -> wins_amount
-- winnings -> wins_amount
-- payouts from games -> wins_amount
-- deposits -> deposits_amount
-- deposit volume -> deposits_amount
-- total deposits -> deposits_amount
-- player deposits -> deposits_amount
-- cash-in volume -> deposits_amount
-- top ups -> deposits_amount
-- top-ups -> deposits_amount
-- withdrawals -> withdrawals_amount
-- withdrawal volume -> withdrawals_amount
-- total withdrawals -> withdrawals_amount
-- cashouts -> withdrawals_amount
-- cash-outs -> withdrawals_amount
-- payout volume -> withdrawals_amount
-- payouts to players -> withdrawals_amount
-- net deposits -> net_deposits
-- net cash in -> net_deposits
-- deposits minus withdrawals -> net_deposits
-- net cashflow from payments -> net_deposits
-- new depositing players -> ftd_count
-- First Time Depositors -> ftd_list
-- First-Time Depositors -> ftd_list
-- ftd count -> ftd_count
-- number of ftds -> ftd_count
-- new depositors -> ftd_count
-- ftd amount -> ftd_amount
-- first deposit amount total -> ftd_amount
-- total first deposits -> ftd_amount
-- ftd value -> ftd_amount
-- active bettors -> active_players_bets
-- betting players -> active_players_bets
-- players who placed bets -> active_players_bets
-- unique active players -> active_players_bets
-- real money players -> active_players_bets
-- depositing players -> unique_depositors
-- unique depositors -> unique_depositors
-- unique depositing players -> unique_depositors
-- unique cash-in players -> unique_depositors
-- return to player -> rtp
-- rtp percentage -> rtp
-- payout percentage -> rtp
-- payback -> rtp
-- payback percentage -> rtp
-- hold -> ggr_margin
-- hold percentage -> ggr_margin
-- house edge -> ggr_margin
-- house margin -> ggr_margin
-- average bet -> avg_bet
-- average bet size -> avg_bet
-- average stake -> avg_bet
-- avg bet -> avg_bet
-- avg stake -> avg_bet
-- hold from deposits -> hold_from_deposits
-- profit over deposits -> hold_from_deposits
-- ggr over deposits -> hold_from_deposits
-- gaming yield on deposits -> hold_from_deposits
-- bonus stakes -> bonus_turnover
-- bonus betting volume -> bonus_turnover
-- bonus turnover -> bonus_turnover
-- wagering volume from bonus -> bonus_turnover
-- bonus ggr share -> bonus_share_of_ggr
-- bonus contribution -> bonus_share_of_ggr
-- bonus share of revenue -> bonus_share_of_ggr
-- bonus impact on ggr -> bonus_share_of_ggr
-- players -> active_players_bets
-- player -> active_players_bets
-- new players -> registered_players
-- new player -> registered_players
-- new clients -> registered_players
-- registrations -> registered_players
-- signups -> registered_players
-- registered players -> registered_players
-- top players -> bets_amount
-- top player -> bets_amount
-- top gamblers -> bets_amount
-
-**Dimension Aliases:**
-
-- Armenia -> dimension.country='AM'
-- country -> dimension.country
-- geo -> dimension.country
-- jurisdiction -> dimension.country
-- market -> dimension.country
-- region -> dimension.country
-- territory -> dimension.country
-- vendor -> dimension.vendor
-- provider -> dimension.vendor
-- studio -> dimension.vendor
-- game provider -> dimension.vendor
-- content provider -> dimension.vendor
-- game -> dimension.game
-- game title -> dimension.game
-- title -> dimension.game
-- slot -> dimension.game
-- casino game -> dimension.game
-- product -> dimension.product
-- vertical -> dimension.product
-- brand product -> dimension.product
-- channel product -> dimension.product
-- brand -> dimension.site
-- site -> dimension.site
-- operator brand -> dimension.site
-- website -> dimension.site
-- platform -> dimension.platform
-- device -> dimension.platform
-- channel -> dimension.platform
-- mobile vs desktop -> dimension.platform
-- os platform -> dimension.platform
-- segment -> dimension.segment
-- player segment -> dimension.segment
-- cohort -> dimension.segment
-- cluster -> dimension.segment
-- customer segment -> dimension.segment
-- player tag -> dimension.player_tag
-- tag -> dimension.player_tag
-- label -> dimension.player_tag
-- player label -> dimension.player_tag
-- currency -> dimension.currency
-- currency code -> dimension.currency
-- ccy -> dimension.currency
-- registration date -> dimension.registration_date
-- signup date -> dimension.registration_date
-- reg date -> dimension.registration_date
-- user -> dimension.player
-- users -> dimension.player
-- client -> dimension.player
-- clients -> dimension.player
-- player id -> dimension.player
-- player_id -> dimension.player
-- client id -> dimension.player
-- client_id -> dimension.player
-- user id -> dimension.player
-- userid -> dimension.player
-- account id -> dimension.player
-- account_id -> dimension.player
-- username -> dimension.player
-- user name -> dimension.player
-- login -> dimension.player
-- nickname -> dimension.player
-- test -> dimension.test_flag=1
-- real -> dimension.test_flag=0
-- non test -> dimension.test_flag=0
-- non-test -> dimension.test_flag=0
-- bonus -> dimension.bonus_flag=1
-- non bonus -> dimension.bonus_flag=0
-- non-bonus -> dimension.bonus_flag=0
-
-**Filter Aliases:**
-
-- slots -> filter.product=casino,filter.game_category=slots
-- slot games -> filter.product=casino,filter.game_category=slots
-- video slots -> filter.product=casino,filter.game_category=slots
-- table games -> filter.product=casino,filter.game_category=table_games
-- roulette and blackjack -> filter.product=casino,filter.game_category=table_games
-- casino tables -> filter.product=casino,filter.game_category=table_games
-- live casino -> filter.product=casino,filter.game_category=live_casino
-- live dealer games -> filter.product=casino,filter.game_category=live_casino
-- live tables -> filter.product=casino,filter.game_category=live_casino
-- rollback -> filter.is_rollback=1
-- successful deposits -> filter.payment_success
-- successful deposit -> filter.payment_success
-- approved deposits -> filter.payment_success
-- approved deposit -> filter.payment_success
-- successful withdrawals -> filter.payment_success
-- successful withdrawal -> filter.payment_success
-- approved withdrawals -> filter.payment_success
-- approved withdrawal -> filter.payment_success
-- paid withdrawals -> filter.payment_success
-- paid withdrawal -> filter.payment_success
-
-**Date Preset Aliases:**
-
-- today -> today
-- for today -> today
-- today only -> today
-- yesterday -> yesterday
-- previous day -> yesterday
-- day before today -> yesterday
-- last 7 days -> last_7_days
-- past 7 days -> last_7_days
-- previous 7 days -> last_7_days
-- last week -> last_week
-- past week -> last_week
-- this week -> this_week
-- current week -> this_week
-- last 30 days -> last_30_days
-- past 30 days -> last_30_days
-- this month -> this_month
-- current month -> this_month
-- last month -> last_month
-- month to date -> mtd
-- mtd -> mtd
-- year to date -> ytd
-- ytd -> ytd
-
-### 5.2 Ambiguous Terms (MUST ASK USER)
-
-| phrase | canonical_kind | candidate_ids | clarification |
-|--------|---------------|---------------|---------------|
-| revenue | metric_id | ggr, net_deposits | Do you mean GGR (bets−wins) or Net Deposits (cash in−cash out)? |
-| profit | metric_id | ggr, net_deposits | Do you mean gaming profit (GGR) or cash flow profit (Net Deposits)? |
-| net profit | metric_id | ggr, ngr | Do you mean GGR (gross gaming revenue) or NGR (net gaming revenue after costs)? |
-| profitability | metric_id | ggr, ngr | Do you mean GGR (gross gaming revenue) or NGR (net gaming revenue after costs)? |
-| overall profit | metric_id | ggr, ngr | Do you mean GGR (gross gaming revenue) or NGR (net gaming revenue after costs)? |
-| casino profit | metric_id | ggr, ngr | Do you mean GGR (gross gaming revenue) or NGR (net gaming revenue after costs)? |
-| sportsbook profit | metric_id | ggr, ngr | Do you mean GGR (gross gaming revenue) or NGR (net gaming revenue after costs)? |
-| margin | metric_id | ggr, ggr_margin | Do you mean GGR margin (GGR / stakes) or absolute GGR? |
-| performance | metric_id | active_players_bets, ggr, ngr | When you say performance, do you mean revenue (GGR/NGR), activity (active players), or another KPI? |
-| activity | metric_id | active_players_bets, bets_count | Do you mean number of active players, number of bets, or another activity metric? |
-| volume | metric_id | bets_amount, deposits_amount | Do you mean bet volume (stakes) or deposits volume? |
-| engagement | metric_id | active_players_bets | Do you mean active players, sessions, or another engagement KPI? |
-| growth | metric_id | deposits_amount, ggr | Do you mean GGR growth, deposits growth, or overall players growth? |
-| FTD | metric | ftd_list |  |
-| first time deposit | metric |  | Do you mean FTD Count or FTD Amount? |
-| first-time deposit | metric |  | Do you mean FTD Count or FTD Amount? |
-
-### 5.3 Unsupported Terms (REJECT)
-
-losing players, big players
-
-## 6. DATE PRESETS
-
-| preset_id | description | notes |
-|-----------|-------------|-------|
-| today | Today only | Interpretation only; LLM generates SQL using the chosen table time column and it |
-| yesterday | Previous day | Interpretation only; LLM generates SQL using the chosen table time column and it |
-| last_7_days | Last 7 days (rolling window) | Interpretation only; LLM generates SQL using the chosen table time column and it |
-| last_30_days | Last 30 days (rolling window) | Interpretation only; LLM generates SQL using the chosen table time column and it |
-| this_month | Current calendar month | Interpretation only; LLM generates SQL using the chosen table time column and it |
-| previous_month | Full previous calendar month | Interpretation only; LLM generates SQL using the chosen table time column and it |
-| last_week | Previous calendar week | Interpretation only; LLM generates SQL using the chosen table time column and it |
-| this_week | Current calendar week | Interpretation only; LLM generates SQL using the chosen table time column and it |
-| last_month | Previous calendar month | Interpretation only; LLM generates SQL using the chosen table time column and it |
-| mtd | Month to date | Interpretation only; LLM generates SQL using the chosen table time column and it |
-| ytd | Year to date | Interpretation only; LLM generates SQL using the chosen table time column and it |
-
-## 7. PLAYER IDENTITY CONTRACT
-
-- **canonical_player_id_fact**: <FACT>.client_id
-- **canonical_client_pk**: m_client.id
-- **canonical_username**: m_client.username
-- **canonical_client_table**: m_client
-- **canonical_join**: <FACT>.client_id = m_client.id AND <FACT>.site_id = m_client.site_id
-- **join_type**: LEFT
-- **enforcement**: hard
-- **applies_when**: player_level
-- **player_id_aliases**: player_id, player id, playerID, player_ids, player ids
-- **canonical_player_id_output_field**: client_id
-- **canonical_player_id_label**: Player ID
-- **canonical_player_id_output_expression**: toString(<FACT>.client_id) AS client_id
-- **canonical_username_output_expression**: m_client.username AS username
-- **no_identifier_aggregation_rule**: Never aggregate player identifiers; client_id and username must be returned at row-level or grouped by client_id explicitly.
-
-## 8. EXAMPLE QUERIES
-
-### GGR by game last 7 days:
-SELECT 
-    sg.title AS game_name,
-    sumIf(a.amount, a.type = 'bet' AND a.is_rollback = 0 AND a.is_test = 0) - 
-    sumIf(a.amount, a.type = 'win' AND a.is_rollback = 0 AND a.is_test = 0) AS ggr
-FROM mt_transaction_main AS a
-LEFT JOIN site_game AS sg ON a.internal_site_game_id = sg.internal_game_id AND a.site_id = sg.site_id
-WHERE a.site_id = {site_id}
-    AND a.created_at_dt >= toDate(now()) - 7
-    AND a.is_test = 0 AND a.is_rollback = 0
-    AND a.type IN ('bet', 'win')
-GROUP BY sg.title
-ORDER BY ggr DESC
-LIMIT 1000;
-
-### Top players by bets amount (default "top players" query):
-SELECT 
-    toString(a.client_id) AS client_id,
-    m.username,
-    sumIf(a.amount, a.type = 'bet' AND a.is_rollback = 0 AND a.is_test = 0) AS bets_amount
-FROM mt_transaction_main AS a
-LEFT JOIN m_client AS m ON a.client_id = m.id AND a.site_id = m.site_id
-WHERE a.site_id = {site_id}
-    AND a.created_at_dt >= toDate(now()) - 30
-    AND a.is_test = 0 AND a.is_rollback = 0
-    AND a.type IN ('bet', 'win')
-GROUP BY a.client_id, m.username
-ORDER BY bets_amount DESC
-LIMIT 20;
-
-### Deposits this month:
-SELECT 
-    toDate(created_at_dt) AS date,
-    sumIf(amount, type = 'deposit' AND status IN (1, 2) AND is_test = 0) AS deposits
-FROM mt_payment_archive FINAL
-WHERE site_id = {site_id}
-    AND created_at_dt >= toStartOfMonth(today())
-    AND is_test = 0
-GROUP BY date
-ORDER BY date
-LIMIT 1000;
-
-### FTD List last 30 days:
-SELECT
-    toString(p.client_id) AS client_id,
-    mc.username AS username,
-    p.created_at_dt AS first_deposit_date,
-    p.amount AS first_deposit_amount
-FROM mt_payment_archive AS p FINAL
+## METRICS
+[metric_id=bets_count]
+  name=0
+  description=Count of real bets.
+  fact_table=mt_transaction_main
+  formula_clickhouse=countIf(type='bet' AND is_rollback=0 AND is_test=0)
+  type=integer
+  grain_level=date,site,currency,product,game,vendor,sub_vendor,client
+  default_filter_behavior=exclude is_test=1 and is_rollback=1
+  status_filter_notes=Exclude is_test=1 (and is_rollback=1 where applicable).
+  implementation_notes=
+[metric_id=bets_amount]
+  name=1
+  description=Total stake volume.
+  fact_table=mt_transaction_main
+  formula_clickhouse=sumIf(amount, type='bet' AND is_rollback=0 AND is_test=0)
+  type=currency
+  grain_level=date,site,currency,product,game,vendor,sub_vendor,client
+  default_filter_behavior=exclude is_test=1 and is_rollback=1
+  status_filter_notes=Exclude is_test=1 (and is_rollback=1 where applicable).
+  implementation_notes=For FX-adjusted views use base_amount.
+[metric_id=wins_amount]
+  name=2
+  description=Total payouts to players.
+  fact_table=mt_transaction_main
+  formula_clickhouse=sumIf(amount, type='win' AND is_rollback=0 AND is_test=0)
+  type=currency
+  grain_level=date,site,currency,product,game,vendor,sub_vendor,client
+  default_filter_behavior=exclude is_test=1 and is_rollback=1
+  status_filter_notes=Exclude is_test=1 (and is_rollback=1 where applicable).
+  implementation_notes=
+[metric_id=ggr]
+  name=3
+  description=Profit before bonuses/taxes.
+  fact_table=mt_transaction_main
+  formula_clickhouse=sumIf(amount, type='bet' AND is_rollback=0 AND is_test=0) - sumIf(amount, type='win' AND is_rollback=0 AND is_test=0)
+  type=currency
+  grain_level=date,site,currency,product,game,vendor,sub_vendor,client
+  default_filter_behavior=exclude is_test=1 and is_rollback=1
+  status_filter_notes=Exclude is_test=1 (and is_rollback=1 where applicable).
+  implementation_notes=Must recompute at query time (not pre-agg).
+[metric_id=rtp]
+  name=4
+  description=Win ratio = wins/stakes.
+  fact_table=mt_transaction_main
+  formula_clickhouse=sumIf(amount, type='win' AND is_rollback=0 AND is_test=0) / NULLIF(sumIf(amount, type='bet' AND is_rollback=0 AND is_test=0),0)
+  type=ratio
+  grain_level=date,site,currency,product,game,vendor,sub_vendor,client
+  default_filter_behavior=exclude is_test=1 and is_rollback=1
+  status_filter_notes=Exclude is_test=1 (and is_rollback=1 where applicable).
+  implementation_notes=Based on consistent filters for win+bet. Return NULL when denominator is 0.
+[metric_id=active_players_bets]
+  name=5
+  description=Unique players with at least one bet.
+  fact_table=mt_transaction_main
+  formula_clickhouse=uniqExactIf(client_id, type='bet' AND is_rollback=0 AND is_test=0)
+  type=integer
+  grain_level=date,site,currency,product,vendor,sub_vendor
+  default_filter_behavior=exclude is_test=1 and is_rollback=1
+  status_filter_notes=Exclude is_test=1 (and is_rollback=1 where applicable).
+  implementation_notes=Bettor-based actives (not login-based).
+[metric_id=bonus_bets_amount]
+  name=6
+  description=Bets made with bonus.
+  fact_table=mt_transaction_main
+  formula_clickhouse=sumIf(amount, type='bet' AND is_bonus=1 AND is_test=0)
+  type=currency
+  grain_level=date,site,currency,product,game,vendor,sub_vendor
+  default_filter_behavior=exclude is_test=1 and is_rollback=1
+  status_filter_notes=Exclude is_test=1 (and is_rollback=1 where applicable).
+  implementation_notes=
+[metric_id=bonus_ggr]
+  name=7
+  description=GGR from bonus play.
+  fact_table=mt_transaction_main
+  formula_clickhouse=sumIf(amount, type='bet' AND is_bonus=1 AND is_test=0) - sumIf(amount, type='win' AND is_bonus=1 AND is_test=0)
+  type=currency
+  grain_level=date,site,currency,product,game,vendor,sub_vendor
+  default_filter_behavior=exclude is_test=1 and is_rollback=1
+  status_filter_notes=Exclude is_test=1 (and is_rollback=1 where applicable).
+  implementation_notes=
+[metric_id=deposits_amount]
+  name=8
+  description=Successful deposits.
+  fact_table=mt_payment_archive
+  formula_clickhouse=sumIf(amount, type='deposit' AND status = 5 AND is_test=0)
+  type=currency
+  grain_level=date,site,currency,payment_method,client
+  default_filter_behavior=exclude is_test=1
+  status_filter_notes=Success status is status = 5 (canonical for v1.2; keep aligned with payment status mapping).
+  implementation_notes=Status 1/2 usually = success; confirm with Payments.
+[metric_id=withdrawals_amount]
+  name=9
+  description=Successful withdrawals.
+  fact_table=mt_payment_archive
+  formula_clickhouse=sumIf(amount, type='withdraw' AND status = 5 AND is_test=0)
+  type=currency
+  grain_level=date,site,currency,payment_method,client
+  default_filter_behavior=exclude is_test=1
+  status_filter_notes=Success status is status = 5 (canonical for v1.2; keep aligned with payment status mapping).
+  implementation_notes=
+[metric_id=net_deposits]
+  name=10
+  description=Deposits minus withdrawals.
+  fact_table=mt_payment_archive
+  formula_clickhouse=( sumIf(amount, type='deposit' AND status = 5 AND is_test=0)
+)
+-
+( sumIf(amount, type='withdraw' AND status = 5 AND is_test=0)
+)
+  type=currency
+  grain_level=date,site,currency,client
+  default_filter_behavior=exclude is_test=1
+  status_filter_notes=Refer to canonical success rule: status = 5 AND is_test=0.
+  implementation_notes=Derived from successful payments only (status = 5). Successful payments: status = 5. Exclude is_test=1.
+[metric_id=ftd_count]
+  name=11
+  description=Distinct players who made their first-ever successful deposit (action_count=1).
+  fact_table=mt_payment_archive
+  formula_clickhouse=uniqExactIf(client_id, type='deposit' AND status = 5 AND is_test=0 AND action_count=1
+)
+  type=integer
+  grain_level=date,site,currency
+  default_filter_behavior=exclude is_test=1
+  status_filter_notes=FTD uses successful deposits only: status = 5. action_count=1 is lifetime first successful deposit.
+  implementation_notes=LOCKED: use action_count=1 + status = 5 + is_test=0. Do not use invented flags. action_count is Nullable in DDL; use action_count=1 (implicitly excludes NULL).
+[metric_id=avg_bet]
+  name=12
+  description=Average stake size
+  fact_table=mt_transaction_main
+  formula_clickhouse=sumIf(amount,type='bet' AND is_rollback=0 AND is_test=0)/NULLIF(countIf(type='bet' AND is_rollback=0 AND is_test=0),0)
+  type=currency
+  grain_level=date,site,currency,product,game,vendor,sub_vendor,client
+  default_filter_behavior=exclude is_test=1 and is_rollback=1
+  status_filter_notes=Exclude is_test=1 (and is_rollback=1 where applicable).
+  implementation_notes=Derived metric. Return NULL when denominator is 0.
+[metric_id=ggr_margin]
+  name=13
+  description=House margin
+  fact_table=mt_transaction_main
+  formula_clickhouse=(sumIf(amount,type='bet' AND is_rollback=0 AND is_test=0)-sumIf(amount,type='win' AND is_rollback=0 AND is_test=0))/NULLIF(sumIf(amount,type='bet' AND is_rollback=0 AND is_test=0),0)
+  type=ratio
+  grain_level=date,site,currency,product,game,vendor,sub_vendor,client
+  default_filter_behavior=exclude is_test=1 and is_rollback=1
+  status_filter_notes=Exclude is_test=1 (and is_rollback=1 where applicable).
+  implementation_notes=Derived metric. Return NULL when denominator is 0.
+[metric_id=hold_from_deposits]
+  name=14
+  description=GGR divided by deposits
+  fact_table=mt_payment_archive
+  formula_clickhouse=(sumIf(a.amount,a.type='bet' AND a.is_rollback=0 AND a.is_test=0)-sumIf(a.amount,a.type='win' AND a.is_rollback=0 AND a.is_test=0)) / NULLIF(sumIf(p.amount,p.type='deposit' AND p.status = 5 AND p.is_test=0),0)
+  type=ratio
+  grain_level=date,site,currency
+  default_filter_behavior=Bets: exclude is_test=1 AND is_rollback=1. Payments: exclude is_test=1 AND status = 5.
+  status_filter_notes=Success status is status = 5 (canonical for v1.2; keep aligned with payment status mapping).
+  implementation_notes=Cross-table ratio. Aggregate both sides at identical grain (date+site+currency) before division. Return NULL if deposits=0. Successful payments: status = 5. Exclude is_test=1.
+[metric_id=unique_depositors]
+  name=15
+  description=Distinct players with successful deposits
+  fact_table=mt_payment_archive
+  formula_clickhouse=uniqExactIf(client_id, type='deposit' AND status = 5 AND is_test=0)
+  type=integer
+  grain_level=date
+  default_filter_behavior=exclude is_test=1
+  status_filter_notes=Success status is status = 5 (canonical for v1.2; keep aligned with payment status mapping).
+  implementation_notes=
+[metric_id=bonus_turnover]
+  name=16
+  description=Stake volume using bonus funds
+  fact_table=mt_transaction_main
+  formula_clickhouse=sumIf(amount, type='bet' AND is_bonus=1 AND is_rollback=0 AND is_test=0)
+  type=currency
+  grain_level=date
+  default_filter_behavior=exclude is_test=1 and is_rollback=1
+  status_filter_notes=Exclude is_test=1 (and is_rollback=1 where applicable).
+  implementation_notes=
+[metric_id=bonus_share_of_ggr]
+  name=17
+  description=% of GGR from bonus play
+  fact_table=mt_transaction_main
+  formula_clickhouse=(sumIf(amount,type='bet' AND is_bonus=1)-sumIf(amount,type='win' AND is_bonus=1)) / NULLIF((sumIf(amount,type='bet')-sumIf(amount,type='win')),0)
+  type=ratio
+  grain_level=date,site,currency,product,game,vendor,sub_vendor,client
+  default_filter_behavior=exclude is_test=1 and is_rollback=1
+  status_filter_notes=Exclude is_test=1 (and is_rollback=1 where applicable).
+  implementation_notes=Sensitive when ggr near 0. Return NULL when denominator is 0.
+[metric_id=ngr]
+  name=18
+  description=Net Gaming Revenue (CEO-locked formula excluding bonus/test components).
+  fact_table=mt_transaction_main
+  formula_clickhouse=(sumIf(amount, type='bet' AND is_rollback=0) - (sumIf(amount, type='bet' AND is_rollback=0 AND is_bonus=1 AND is_test=0) + sumIf(amount, type='bet' AND is_rollback=0 AND is_test=1 AND is_bonus=0) + sumIf(amount, type='bet' AND is_rollback=0 AND is_test=1 AND is_bonus=1))) - (sumIf(amount, type='win' AND is_rollback=0) - (sumIf(amount, type='win' AND is_rollback=0 AND is_bonus=1 AND is_test=0) + sumIf(amount, type='win' AND is_rollback=0 AND is_test=1 AND is_bonus=0) + sumIf(amount, type='win' AND is_rollback=0 AND is_test=1 AND is_bonus=1)))
+  type=currency
+  grain_level=date,site,currency,product,game,vendor,sub_vendor,client
+  default_filter_behavior=exclude is_test=1 and is_rollback=1
+  status_filter_notes=Exclude is_test=1 (and is_rollback=1 where applicable).
+  implementation_notes=CEO-LOCKED: preserve formula exactly. Do not simplify. Do not replace with GGR.
+[metric_id=ftd_amount]
+  name=19
+  description=Total amount of first-ever successful deposits (action_count=1).
+  fact_table=mt_payment_archive
+  formula_clickhouse=sumIf(amount, type='deposit' AND status = 5 AND is_test=0 AND action_count=1
+)
+  type=currency
+  grain_level=date,site,currency
+  default_filter_behavior=exclude is_test=1
+  status_filter_notes=Successful deposits only: status = 5. action_count=1 identifies first successful deposit.
+  implementation_notes=LOCKED: use action_count=1. Do not claim it is not computable from the fact table. action_count is Nullable in DDL; use action_count=1 (implicitly excludes NULL).
+[metric_id=registered_players]
+  name=20
+  description=Distinct players registered in the selected period.
+  fact_table=m_client
+  formula_clickhouse=COUNT(DISTINCT id)
+  type=count_distinct
+  grain_level=site
+  default_filter_behavior=none
+  status_filter_notes=N/A (m_client registrations)
+  implementation_notes=Use m_client.created_at (epoch seconds) for time filtering; convert to DateTime. No is_test flag on m_client.
+[metric_id=ftd_list]
+  name=21
+  description=List of first-time depositors (first successful deposit per player).
+  fact_table=mt_payment_archive
+  formula_clickhouse=SELECT toString(p.client_id) AS client_id, mc.username AS username, p.created_at_dt AS first_deposit_date, p.amount AS first_deposit_amount
+FROM mt_payment_archive AS p
 LEFT JOIN m_client AS mc ON p.client_id = mc.id AND p.site_id = mc.site_id
-WHERE p.site_id = {site_id}
-    AND p.type = 'deposit'
-    AND p.status IN (1, 2)
-    AND p.is_test = 0
-    AND p.action_count = 1
-    AND p.created_at_dt >= toDate(now()) - 30
-ORDER BY p.created_at_dt DESC
-LIMIT 1000;
-
-### NGR (CEO-locked formula) last 30 days:
-SELECT
-    (
-      sumIf(amount, type='bet' AND is_rollback=0)
-      - sumIf(amount, type='bet' AND is_rollback=0 AND (is_bonus=1 OR is_test=1))
-    )
-    -
-    (
-      sumIf(amount, type='win' AND is_rollback=0)
-      - sumIf(amount, type='win' AND is_rollback=0 AND (is_bonus=1 OR is_test=1))
-    ) AS ngr
-FROM mt_transaction_main AS a
-WHERE a.site_id = {site_id}
-    AND a.created_at_dt >= toDate(now()) - 30
-    AND a.type IN ('bet', 'win')
-LIMIT 1000;
-`
-
-// ProdDDLSchema provides the production column-level schema (v1.1.0).
-const ProdDDLSchema = `
-# DATABASE SCHEMA (DDL) — LIVE ENTERPRISE v1.1.0
-
-## IMPORTANT RULES
-- Columns with should_exclude_from_filters=YES must NOT appear in WHERE/GROUP BY/SELECT
-- NEVER select: _peerdb_synced_at, _peerdb_is_deleted, _peerdb_version, microtime
-- mt_transaction_main.type Enum includes ''=0 (UNKNOWN) — NEVER use it; enforce type IN ('bet','win')
-- client_id must be returned as toString(<FACT>.client_id) AS client_id
-
-## Bet/Win Transactions (mt_transaction_main)
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| after_balance | Nullable(Decimal(18, 8)) | Amount value. | amount | YES | NO |
-| amount | Decimal(18, 8) | Raw transaction amount (stake or win). | amount | NO | NO |
-| base_amount | Nullable(Decimal(18, 8)) | Amount in base currency | amount | YES | NO |
-| before_balance | Nullable(Decimal(18, 8)) | Amount value. | amount | YES | NO |
-| bet_type | LowCardinality(String) | Bet type field. | string | NO | NO |
-| btag | Nullable(String) | Btag field. | string | YES | NO |
-| client_bonus_id | Nullable(UInt32) | Identifier / foreign key. | id | YES | NO |
-| client_id | UInt32 | Player identifier. | identifier | NO | NO |
-| created_at | Date | Creation date/timestamp | date | NO | NO |
-| created_at_dt | DateTime | Creation datetime | datetime | NO | NO |
-| created_at_ts | UInt64 | Epoch timestamp (technical). | string | NO | NO |
-| currency_id | UInt16 | Currency ID | id | NO | NO |
-| debit_id | Nullable(UInt64) | Identifier / foreign key. | id | YES | NO |
-| game_id | Nullable(String) | Identifier / foreign key. | id | YES | NO |
-| id | UInt64 | Primary key row identifier. | id | NO | NO |
-| internal_site_game_id | Nullable(Int32) | Identifier / foreign key. | id | YES | NO |
-| is_bonus | Bool | Boolean flag. | flag | NO | NO |
-| is_free_round | Bool | Boolean flag. | flag | NO | NO |
-| is_rollback | Bool | Rollback/reversal flag | flag | NO | NO |
-| is_test | Bool | Test/QA flag | flag | NO | NO |
-| meta | Nullable(String) | JSON metadata | metadata | YES | YES |
-| microtime | Float64 | Versioning field | string | NO | YES |
-| product_id | Nullable(UInt64) | Product/vertical ID May be NULL for some transactions. | id | YES | NO |
-| rates | Nullable(String) | FX rates metadata | metadata | YES | YES |
-| round_id | Nullable(String) | Identifier / foreign key. | id | YES | NO |
-| site_id | UInt32 | Site/brand ID | id | NO | NO |
-| sub_vendor_id | Nullable(UInt32) | Vendor/provider identifier. | id | YES | NO |
-| table_id | UInt64 | Identifier / foreign key. | id | NO | NO |
-| type | Enum8('bet' = -1, '' = 0, 'win' = 1) | Type/category Physical DDL also contains empty enum value '' | category | NO | NO |
-| vendor_id | UInt32 | Vendor/provider ID | id | NO | NO |
-
-## Deposit/Withdraw Transactions (mt_payment_archive)
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| action_count | Nullable(UInt32) | Actions count Used for FTD: first successful deposit is acti | string | YES | NO |
-| after_balance | Nullable(Decimal(18, 8)) | Amount value. | amount | YES | NO |
-| amount | Decimal(18, 8) | Transaction amount in payment currency. | amount | NO | NO |
-| base_amount | Nullable(Decimal(18, 8)) | Amount in base currency | amount | YES | NO |
-| before_balance | Nullable(Decimal(18, 8)) | Amount value. | amount | YES | NO |
-| bind | Bool | Boolean flag. | flag | NO | NO |
-| btag | Nullable(String) | Btag field. | string | YES | NO |
-| cashback_id | Nullable(UInt32) | Identifier / foreign key. | id | YES | NO |
-| client_account_id | UInt32 | Identifier / foreign key. | id | NO | NO |
-| client_account_type | String | Client account type field. | string | NO | NO |
-| client_bonus_id | Nullable(UInt32) | Identifier / foreign key. | id | YES | NO |
-| client_id | UInt32 | Player ID. | identifier | NO | NO |
-| created_at | Date | Creation date/timestamp | date | NO | NO |
-| created_at_dt | DateTime64(3) | Creation datetime | datetime | NO | NO |
-| created_at_ts | UInt64 | Epoch timestamp (technical). | string | NO | NO |
-| currency_code | String | Currency code | category | NO | NO |
-| currency_id | UInt16 | Currency ID | id | NO | NO |
-| external_transaction_id | Nullable(String) | Identifier / foreign key. | id | YES | NO |
-| id | UInt64 | Primary key row identifier. | id | NO | NO |
-| info | Nullable(String) | Info/notes metadata | metadata | YES | YES |
-| is_correction | Bool | Boolean flag. | flag | NO | NO |
-| is_land_based | Bool | Boolean flag. | flag | NO | NO |
-| is_test | Bool | Test/QA flag | flag | NO | NO |
-| meta | Nullable(String) | JSON metadata | metadata | YES | YES |
-| microtime | Float64 | Versioning field | string | NO | YES |
-| rates | Nullable(String) | FX rates metadata | metadata | YES | YES |
-| ref_transaction_id | Nullable(UInt64) | Identifier / foreign key. | id | YES | NO |
-| settled_at | Nullable(Date) | Settlement date | date | YES | NO |
-| settled_at_dt | Nullable(DateTime64(3)) | Settlement datetime | datetime | YES | NO |
-| settled_at_ts | Nullable(UInt64) | Epoch timestamp (technical). | string | YES | NO |
-| site_bonus_action_type | Nullable(String) | Site bonus action type field. | string | YES | NO |
-| site_bonus_id | Nullable(UInt32) | Identifier / foreign key. | id | YES | NO |
-| site_id | UInt32 | Site/brand ID | id | NO | NO |
-| site_payment_id | UInt32 | Site payment method ID | id | NO | NO |
-| site_payment_type | Enum8('system' = 1, 'not_system' = 2) | Site payment type field. | string | NO | NO |
-| status | UInt16 | Status code | category | NO | NO |
-| transaction_id | String | Identifier / foreign key. | id | NO | NO |
-| type | Enum8('withdraw'=-1,'deposit'=1) | Type/category | category | NO | NO |
-| updated_at | Date | Update date/timestamp | date | NO | NO |
-| updated_at_dt | DateTime64(3) | Update datetime | datetime | NO | NO |
-| updated_at_ts | UInt64 | Epoch timestamp (technical). | string | NO | NO |
-| withdraw_fee_amount | Nullable(Decimal(18, 8)) | Amount value. | amount | YES | NO |
-| withdraw_fee_percent | Nullable(Decimal(18, 8)) | Withdraw fee percent field. | amount | YES | NO |
-| action_count | Nullable(UInt32) | Actions count | string | YES | NO |
-| after_balance | Nullable(Decimal(18, 8)) | Amount value. | amount | YES | NO |
-| amount | Decimal(18, 8) | Monetary amount field. | amount | NO | NO |
-| base_amount | Nullable(Decimal(18, 8)) | Amount in base currency | amount | YES | NO |
-| before_balance | Nullable(Decimal(18, 8)) | Amount value. | amount | YES | NO |
-| bind | Bool | Boolean flag. | flag | NO | NO |
-| btag | Nullable(String) | Btag field. | string | YES | NO |
-| cashback_id | Nullable(UInt32) | Identifier / foreign key. | id | YES | NO |
-| client_account_id | UInt32 | Identifier / foreign key. | id | NO | NO |
-| client_account_type | String | Client account type field. | string | NO | NO |
-| client_bonus_id | Nullable(UInt32) | Identifier / foreign key. | id | YES | NO |
-| client_id | UInt32 | Identifier used for joins and filtering. | identifier | NO | NO |
-| created_at | Date | Creation date/timestamp | date | NO | NO |
-| created_at_dt | DateTime64(3) | Creation datetime | datetime | NO | NO |
-| created_at_ts | UInt64 | Epoch timestamp (technical). | string | NO | NO |
-| currency_code | String | Currency code | category | NO | NO |
-| currency_id | UInt16 | Currency ID | id | NO | NO |
-| external_transaction_id | Nullable(String) | Identifier / foreign key. | id | YES | NO |
-| id | UInt64 | Primary key row identifier. | id | NO | NO |
-| info | Nullable(String) | Info/notes metadata | metadata | YES | YES |
-| is_correction | Bool | Boolean flag. | flag | NO | NO |
-| is_land_based | Bool | Boolean flag. | flag | NO | NO |
-| is_test | Bool | Test/QA flag | flag | NO | NO |
-| meta | Nullable(String) | JSON metadata | metadata | YES | YES |
-| microtime | Float64 | Versioning field | string | NO | YES |
-| rates | Nullable(String) | FX rates metadata | metadata | YES | YES |
-| ref_transaction_id | Nullable(UInt64) | Identifier / foreign key. | id | YES | NO |
-| settled_at | Nullable(Date) | Settlement date | date | YES | NO |
-| settled_at_dt | Nullable(DateTime64(3)) | Settlement datetime | datetime | YES | NO |
-| settled_at_ts | Nullable(UInt64) | Epoch timestamp (technical). | string | YES | NO |
-| site_bonus_action_type | Nullable(String) | Site bonus action type field. | string | YES | NO |
-| site_bonus_id | Nullable(UInt32) | Identifier / foreign key. | id | YES | NO |
-| site_id | UInt32 | Site/brand ID | id | NO | NO |
-| site_payment_id | UInt32 | Site payment method ID | id | NO | NO |
-| site_payment_type | Enum8('system' = 1, 'not_system' = 2) | Site payment type field. | string | NO | NO |
-| status | UInt16 | Status code | category | NO | NO |
-| transaction_id | String | Identifier / foreign key. | id | NO | NO |
-| type | Enum8('withdraw' = -1, 'deposit' = 1) | Type/category | category | NO | NO |
-| updated_at | Date | Update date/timestamp | date | NO | NO |
-| updated_at_dt | DateTime64(3) | Update datetime | datetime | NO | NO |
-| updated_at_ts | UInt64 | Epoch timestamp (technical). | string | NO | NO |
-| withdraw_fee_amount | Nullable(Decimal(18, 8)) | Amount value. | amount | YES | NO |
-| withdraw_fee_percent | Nullable(Decimal(18, 8)) | Withdraw fee percent field. | amount | YES | NO |
-
-## Client Table (m_client)
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| active | Bool | Active field. | flag | NO | NO |
-| activity_level | Int16 | Activity level field. | string | NO | NO |
-| client_info_id | UInt32 | Identifier / foreign key. | id | NO | NO |
-| created_at | UInt32 | Creation date/timestamp | date | NO | NO |
-| currency_id | UInt16 | Currency ID | id | NO | NO |
-| deleted_at | UInt32 | Deleted at field. | date | NO | NO |
-| email_verified | Bool | Email verified field. | string | NO | NO |
-| id | UInt32 | Primary key row identifier. | id | NO | NO |
-| ip | String | Registration or last IP. | pii_identifier | NO | YES |
-| is_locked | Bool | Boolean flag. | flag | NO | NO |
-| is_test | Bool | Test/QA flag | flag | NO | NO |
-| last_visit | UInt32 | Last visit field. | string | NO | NO |
-| locked | String | Locked field. | string | NO | NO |
-| meta | String | JSON metadata | metadata | NO | YES |
-| phone_verified | Bool | Phone verified field. | string | NO | NO |
-| site_id | UInt32 | Site/brand ID | id | NO | NO |
-| status | Int16 | Status code | category | NO | NO |
-| username | String | Player username | username | NO | NO |
-| verified | Bool | Verified field. | string | NO | NO |
-
-## Currency (currency)
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| code | String | Display label. | category | NO | NO |
-| deleted_at | Int32 | Deleted at field. | date | NO | NO |
-| id | UInt16 | Primary key row identifier. | id | NO | NO |
-| value | Decimal(6, 4) | Value field. | amount | NO | NO |
-
-## m_currency (m_currency)
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| code | String | Display label. | category | NO | NO |
-| deleted_at | Int32 | Deleted at field. | date | NO | NO |
-| id | UInt16 | Primary key row identifier. | id | NO | NO |
-| value | Decimal(6, 4) | Value field. | amount | NO | NO |
-
-## m_products (m_products)
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| alias | String | Display label. | category | NO | NO |
-| id | UInt64 | Primary key row identifier. | id | NO | NO |
-| name | String | Display label. | string | NO | NO |
-
-## m_segment_client_tmp (m_segment_client_tmp)
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| client_id | UInt32 | Identifier used for joins and filtering. | identifier | NO | NO |
-| segment_id | UInt64 | Identifier / foreign key. | id | NO | NO |
-| type | String default 'system' | Type/category | category | NO | NO |
-
-## m_site (m_site)
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| analytics_data_id | String | Identifier / foreign key. | id | NO | NO |
-| analytics_data_v4_client_id | String | Identifier / foreign key. | id | NO | NO |
-| analytics_data_v4_id | String | Identifier / foreign key. | id | NO | NO |
-| analytics_data_v4_secret | String | Analytics data v4 secret field. | string | NO | NO |
-| created_at | DateTime64(6) | Creation date/timestamp | datetime | NO | NO |
-| creator_user_id | UInt64 | Identifier / foreign key. | id | NO | NO |
-| deleted_at | DateTime64(6) | Deleted at field. | datetime | NO | NO |
-| editor_user_id | UInt64 | Identifier / foreign key. | id | NO | NO |
-| email | String | Email field. | pii_identifier | NO | YES |
-| id | UInt32 | Primary key row identifier. | id | NO | NO |
-| internal | Bool | Internal field. | string | NO | NO |
-| name | String | Display label. | string | NO | NO |
-| property_id | Int32 | Identifier / foreign key. | id | NO | NO |
-| service_account_credentials_json | String | Service account credentials json field. | metadata | NO | YES |
-| site_option_id | UInt16 | Identifier / foreign key. | id | NO | NO |
-| skin_style | String | Skin style field. | string | NO | NO |
-| status | String | Status code | category | NO | NO |
-| token_expire | Int32 | Token expire field. | string | NO | NO |
-| updated_at | DateTime64(6) | Update date/timestamp | datetime | NO | NO |
-| url | String | Url field. | string | NO | NO |
-
-## m_site_game (m_site_game)
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| bonus_percent_id | UInt32 | Identifier / foreign key. | id | NO | NO |
-| cols | UInt8 | Cols field. | string | NO | NO |
-| comment | String | Comment field. | string | NO | NO |
-| created_at | DateTime64(6) | Creation date/timestamp | datetime | NO | NO |
-| deleted_at | DateTime64(6) | Deleted at field. | datetime | NO | NO |
-| exported | Bool | Exported field. | flag | NO | NO |
-| external_game_id | String | Identifier / foreign key. | id | NO | NO |
-| free_round_id | String | Identifier / foreign key. | id | NO | NO |
-| game_group_id | UInt32 | Identifier / foreign key. | id | NO | NO |
-| game_id | String | Identifier / foreign key. | id | NO | NO |
-| hide | Int8 | Hide field. | string | NO | NO |
-| id | Int32 | Primary key row identifier. | id | NO | NO |
-| img | String | Img field. | string | NO | NO |
-| img_thumb | String | Img thumb field. | string | NO | NO |
-| internal_game_id | UInt32 | Identifier / foreign key. | id | NO | NO |
-| is_active | Bool | Boolean flag. | flag | NO | NO |
-| is_bonus_supported | Bool | Boolean flag. | flag | NO | NO |
-| is_demo_supported | Bool | Boolean flag. | flag | NO | NO |
-| is_enabled | Bool | Boolean flag. | flag | NO | NO |
-| is_free_round_supported | Bool | Boolean flag. | flag | NO | NO |
-| is_main | Bool | Boolean flag. | flag | NO | NO |
-| is_mobile | Bool | Boolean flag. | flag | NO | NO |
-| keywords | String | Keywords field. | string | NO | NO |
-| last_updated_by_cms_user_id | UInt32 | Identifier / foreign key. | id | NO | NO |
-| last_updated_date | String | Last updated date field. | date | NO | NO |
-| mobile_thumb | String | Mobile thumb field. | string | NO | NO |
-| open_type | String | Open type field. | string | NO | NO |
-| order | Int32 | Order field. | string | NO | NO |
-| product_id | UInt32 | Product/vertical ID | id | NO | NO |
-| ratio | String | Ratio field. | string | NO | NO |
-| rows | UInt8 | Rows field. | string | NO | NO |
-| site_id | UInt32 | Site/brand ID | id | NO | NO |
-| sub_vendor_id | UInt32 | Vendor/provider identifier. | id | NO | NO |
-| table_id | String | Identifier / foreign key. | id | NO | NO |
-| title | String | Display label. | string | NO | NO |
-| updated_at | DateTime64(6) | Update date/timestamp | datetime | NO | NO |
-| vendor_id | UInt32 | Vendor/provider ID | id | NO | NO |
-| vertical_thumb | String | Vertical thumb field. | string | NO | NO |
-| view_type | String | View type field. | category | NO | NO |
-| wager_percent | UInt32 | Wager percent field. | string | NO | NO |
-
-## m_site_payment (m_site_payment)
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| background_image | String | Background image field. | string | NO | NO |
-| created_at | DateTime64(6) | Creation date/timestamp | datetime | NO | NO |
-| deposit_info | String | Deposit info field. | string | NO | NO |
-| id | UInt32 | Primary key row identifier. | id | NO | NO |
-| information_notice | String | Information notice field. | string | NO | NO |
-| is_active | Bool | Boolean flag. | flag | NO | NO |
-| is_active_deposit | Bool | Boolean flag. | flag | NO | NO |
-| is_active_payout | Bool | Boolean flag. | flag | NO | NO |
-| is_cancelable | Bool | Boolean flag. | flag | NO | NO |
-| is_country_detached | Bool | Boolean flag. | flag | NO | NO |
-| is_crypto | Bool | Boolean flag. | flag | NO | NO |
-| is_dashboard_deposit | Bool | Boolean flag. | flag | NO | NO |
-| is_dashboard_withdraw | Bool | Boolean flag. | flag | NO | NO |
-| is_main_config | Bool | Boolean flag. | flag | NO | NO |
-| is_online_deposit | Bool | Boolean flag. | flag | NO | NO |
-| is_online_payout | Bool | Boolean flag. | flag | NO | NO |
-| is_single_payout | Bool | Boolean flag. | flag | NO | NO |
-| is_visible | Int8 | Boolean flag. | flag | NO | NO |
-| name | String | Display label. | string | NO | NO |
-| order | Int32 | Order field. | string | NO | NO |
-| payment_id | UInt32 | Payment method/provider identifier. | id | NO | NO |
-| payout_fee_percent | Decimal(5, 2) | Payout fee percent field. | amount | NO | NO |
-| payout_info | String | Payout info field. | string | NO | NO |
-| rollover_factor | UInt32 | Rollover factor field. | string | NO | NO |
-| settings | String | Metadata / JSON or free-form configuration. | metadata | NO | YES |
-| show_notice | Bool | Show notice field. | string | NO | NO |
-| site_id | UInt32 | Site/brand ID | id | NO | NO |
-| slug | String | Display label. | string | NO | NO |
-| updated_at | DateTime64(6) | Update date/timestamp | datetime | NO | NO |
-| visible_in_control | String | Visible in control field. | string | NO | NO |
-
-## m_sub_vendor (m_sub_vendor)
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| code | String | Display label. | category | NO | NO |
-| created_at | DateTime64(6) | Creation date/timestamp | datetime | NO | NO |
-| hide_from_main_grid | Bool | Hide from main grid field. | string | NO | NO |
-| id | UInt32 | Primary key row identifier. | id | NO | NO |
-| image | String | Image field. | string | NO | NO |
-| interface | Int32 | Interface field. | string | NO | NO |
-| is_active | Bool | Boolean flag. | flag | NO | NO |
-| logo_icon | String | Logo icon field. | string | NO | NO |
-| name | String | Display label. | string | NO | NO |
-| order | Int32 | Order field. | string | NO | NO |
-| site_id | UInt32 | Site/brand ID | id | NO | NO |
-| title | String | Display label. | string | NO | NO |
-| updated_at | DateTime64(6) | Update date/timestamp | datetime | NO | NO |
-| vendor_id | UInt32 | Vendor/provider ID | id | NO | NO |
-| vendor_segment_id | UInt16 | Vendor/provider identifier. | id | NO | NO |
-| window_type | String | Window type field. | string | NO | NO |
-
-## m_vendor (m_vendor)
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| code | String | Display label. | category | NO | NO |
-| id | UInt32 | Primary key row identifier. | id | NO | NO |
-| is_active | Bool | Boolean flag. | flag | NO | NO |
-| is_free_game_possible | Bool | Boolean flag. | flag | NO | NO |
-| name | String | Display label. | string | NO | NO |
-| title | String | Display label. | string | NO | NO |
-| vendor_segment_id | UInt16 | Vendor/provider identifier. | id | NO | NO |
-
-## Products (products)
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| alias | String | Display label. | category | NO | NO |
-| id | UInt64 | Primary key row identifier. | id | NO | NO |
-| name | String | Display label. | string | NO | NO |
-
-## segment (segment)
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| calculated_at | UInt64 | Calculated at field. | date | NO | NO |
-| count | UInt64 | Count field. | string | NO | NO |
-| count_start | UInt64 | Count start field. | string | NO | NO |
-| created_at | UInt64 | Creation date/timestamp | date | NO | NO |
-| created_by | String | Created by field. | string | NO | NO |
-| frequency | String | Frequency field. | string | NO | NO |
-| id | UInt64 | Primary key row identifier. | id | NO | NO |
-| include_locked_clients | UInt8 | Include locked clients field. | string | NO | NO |
-| name | String | Display label. | string | NO | NO |
-| note | String | Note field. | string | NO | NO |
-| site_id | UInt32 | Site/brand ID | id | NO | NO |
-| status | UInt32 | Status code | category | NO | NO |
-| type | LowCardinality(String) | Type/category | category | NO | NO |
-| update_status | String | Update status field. | string | NO | NO |
-| updated_at | UInt64 | Update date/timestamp | date | NO | NO |
-| updated_by | String | Updated by field. | string | NO | NO |
-
-## site (site)
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| analytics_data_id | String | Identifier / foreign key. | id | NO | NO |
-| analytics_data_v4_client_id | String | Identifier / foreign key. | id | NO | NO |
-| analytics_data_v4_id | String | Identifier / foreign key. | id | NO | NO |
-| analytics_data_v4_secret | String | Analytics data v4 secret field. | string | NO | NO |
-| created_at | DateTime64(6) | Creation date/timestamp | datetime | NO | NO |
-| creator_user_id | UInt64 | Identifier / foreign key. | id | NO | NO |
-| deleted_at | DateTime64(6) | Deleted at field. | datetime | NO | NO |
-| editor_user_id | UInt64 | Identifier / foreign key. | id | NO | NO |
-| email | String | Email field. | pii_identifier | NO | YES |
-| id | UInt32 | Primary key row identifier. | id | NO | NO |
-| internal | Bool | Internal field. | string | NO | NO |
-| name | String | Display label. | string | NO | NO |
-| property_id | Int32 | Identifier / foreign key. | id | NO | NO |
-| service_account_credentials_json | String | Service account credentials json field. | metadata | NO | YES |
-| site_option_id | UInt16 | Identifier / foreign key. | id | NO | NO |
-| skin_style | String | Skin style field. | string | NO | NO |
-| status | LowCardinality(String) | Status code | category | NO | NO |
-| token_expire | Int32 | Token expire field. | string | NO | NO |
-| updated_at | DateTime64(6) | Update date/timestamp | datetime | NO | NO |
-| url | String | Url field. | string | NO | NO |
-
-## site_bonus (site_bonus)
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| account_type | LowCardinality(String) | Account type field. | category | NO | NO |
-| action_type | LowCardinality(String) | Action type field. | category | NO | NO |
-| bonus_type | LowCardinality(String) | Bonus type field. | string | NO | NO |
-| claimable_period | Float32 | Claimable period field. | string | NO | NO |
-| created_at | DateTime64(6) | Creation date/timestamp | datetime | NO | NO |
-| default_language | Int32 | Default language field. | string | NO | NO |
-| deleted_at | DateTime64(6) | Deleted at field. | datetime | NO | NO |
-| description | String | Description field. | string | NO | NO |
-| desktop_image | String | Desktop image field. | string | NO | NO |
-| duration | UInt16 | Duration field. | string | NO | NO |
-| end_date | UInt32 | End date field. | date | NO | NO |
-| expiration_period | DateTime64(6) | Expiration period field. | datetime | NO | NO |
-| expiry | UInt32 | Expiry field. | string | NO | NO |
-| icon | String | Icon field. | string | NO | NO |
-| id | UInt32 | Primary key row identifier. | id | NO | NO |
-| image | String | Image field. | string | NO | NO |
-| is_active | Bool | Boolean flag. | flag | NO | NO |
-| is_claimable | Bool | Boolean flag. | flag | NO | NO |
-| is_hidden | Bool | Boolean flag. | flag | NO | NO |
-| is_real_amount_lock | Bool | Boolean flag. | amount | NO | NO |
-| is_request | Bool | Boolean flag. | flag | NO | NO |
-| is_rollover | UInt8 | Boolean flag. | flag | NO | NO |
-| is_single_acquire | Bool | Boolean flag. | flag | NO | NO |
-| is_unique | Bool | Boolean flag. | flag | NO | NO |
-| is_verified | Bool | Boolean flag. | flag | NO | NO |
-| max_receive_factor | UInt16 | Max receive factor field. | string | NO | NO |
-| mobile_image | String | Mobile image field. | string | NO | NO |
-| name | String | Display label. | string | NO | NO |
-| parent_bonus_id | UInt32 | Identifier / foreign key. | id | NO | NO |
-| payment_number | UInt16 | Payment number field. | string | NO | NO |
-| payment_referenced | UInt8 | Payment referenced field. | string | NO | NO |
-| payout_time_range | UInt16 | Payout time range field. | string | NO | NO |
-| priority | UInt8 | Priority field. | string | NO | NO |
-| rollover_with_other | UInt8 | Rollover with other field. | string | NO | NO |
-| schedule | String | Schedule field. | string | NO | NO |
-| site_bonus_preset_id | UInt32 | Identifier / foreign key. | id | NO | NO |
-| site_bonus_type | Int16 | Site bonus type field. | string | NO | NO |
-| site_id | UInt32 | Site/brand ID | id | NO | NO |
-| skip_country | Bool | Skip country field. | string | NO | NO |
-| skip_site_payment | Bool | Skip site payment field. | string | NO | NO |
-| start_date | UInt32 | Start date field. | date | NO | NO |
-| start_time | String | Start time field. | string | NO | NO |
-| updated_at | DateTime64(6) | Update date/timestamp | datetime | NO | NO |
-| wager_type | LowCardinality(String) | Wager type field. | string | NO | NO |
-| withdraw_access | Bool | Withdraw access field. | string | NO | NO |
-
-## Site Games (site_game)
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| bonus_percent_id | UInt32 | Identifier / foreign key. | id | NO | NO |
-| cols | UInt8 | Cols field. | string | NO | NO |
-| comment | String | Comment field. | string | NO | NO |
-| created_at | DateTime64(6) | Creation date/timestamp | datetime | NO | NO |
-| deleted_at | DateTime64(6) | Deleted at field. | datetime | NO | NO |
-| exported | Bool | Exported field. | flag | NO | NO |
-| external_game_id | String | Identifier / foreign key. | id | NO | NO |
-| free_round_id | String | Identifier / foreign key. | id | NO | NO |
-| game_group_id | UInt32 | Identifier / foreign key. | id | NO | NO |
-| game_id | String | Identifier / foreign key. | id | NO | NO |
-| hide | Int8 | Hide field. | string | NO | NO |
-| id | Int32 | Primary key row identifier. | id | NO | NO |
-| img | String | Img field. | string | NO | NO |
-| img_thumb | String | Img thumb field. | string | NO | NO |
-| internal_game_id | UInt32 | Identifier / foreign key. | id | NO | NO |
-| is_active | Bool | Boolean flag. | flag | NO | NO |
-| is_bonus_supported | Bool | Boolean flag. | flag | NO | NO |
-| is_demo_supported | Bool | Boolean flag. | flag | NO | NO |
-| is_enabled | Bool | Boolean flag. | flag | NO | NO |
-| is_free_round_supported | Bool | Boolean flag. | flag | NO | NO |
-| is_main | Bool | Boolean flag. | flag | NO | NO |
-| is_mobile | Bool | Boolean flag. | flag | NO | NO |
-| keywords | String | Keywords field. | string | NO | NO |
-| last_updated_by_cms_user_id | UInt32 | Identifier / foreign key. | id | NO | NO |
-| last_updated_date | String | Last updated date field. | date | NO | NO |
-| mobile_thumb | String | Mobile thumb field. | string | NO | NO |
-| open_type | LowCardinality(String) | Open type field. | string | NO | NO |
-| order | Int32 | Order field. | string | NO | NO |
-| product_id | UInt32 | Product/vertical ID | id | NO | NO |
-| ratio | String | Ratio field. | string | NO | NO |
-| rows | UInt8 | Rows field. | string | NO | NO |
-| site_id | UInt32 | Site/brand ID | id | NO | NO |
-| sub_vendor_id | UInt32 | Vendor/provider identifier. | id | NO | NO |
-| table_id | String | Identifier / foreign key. | id | NO | NO |
-| title | String | Display label. | string | NO | NO |
-| updated_at | DateTime64(6) | Update date/timestamp | datetime | NO | NO |
-| vendor_id | UInt32 | Vendor/provider ID | id | NO | NO |
-| vertical_thumb | String | Vertical thumb field. | string | NO | NO |
-| view_type | LowCardinality(String) | View type field. | category | NO | NO |
-| wager_percent | UInt32 | Wager percent field. | string | NO | NO |
-
-## Payment Methods (site_payment)
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| background_image | String | Background image field. | string | NO | NO |
-| created_at | DateTime64(6) | Creation date/timestamp | datetime | NO | NO |
-| deposit_info | String | Deposit info field. | string | NO | NO |
-| deposit_verified | Bool | Deposit verified field. | string | NO | NO |
-| id | UInt32 | Primary key row identifier. | id | NO | NO |
-| information_notice | String | Information notice field. | string | NO | NO |
-| is_active | Bool | Boolean flag. | flag | NO | NO |
-| is_active_deposit | Bool | Boolean flag. | flag | NO | NO |
-| is_active_payout | Bool | Boolean flag. | flag | NO | NO |
-| is_cancelable | Bool | Boolean flag. | flag | NO | NO |
-| is_country_detached | Bool | Boolean flag. | flag | NO | NO |
-| is_crypto | Bool | Boolean flag. | flag | NO | NO |
-| is_dashboard_deposit | Bool | Boolean flag. | flag | NO | NO |
-| is_dashboard_withdraw | Bool | Boolean flag. | flag | NO | NO |
-| is_main_config | Bool | Boolean flag. | flag | NO | NO |
-| is_online_deposit | Bool | Boolean flag. | flag | NO | NO |
-| is_online_payout | Bool | Boolean flag. | flag | NO | NO |
-| is_single_payout | Bool | Boolean flag. | flag | NO | NO |
-| is_visible | Int8 | Boolean flag. | flag | NO | NO |
-| name | String | Display label. | string | NO | NO |
-| order | Int32 | Order field. | string | NO | NO |
-| payment_id | UInt32 | Payment method/provider identifier. | id | NO | NO |
-| payout_fee_percent | Decimal(5, 2) | Payout fee percent field. | amount | NO | NO |
-| payout_info | String | Payout info field. | string | NO | NO |
-| payout_verified | Bool | Payout verified field. | string | NO | NO |
-| rollover_factor | UInt32 | Rollover factor field. | string | NO | NO |
-| settings | String | Metadata / JSON or free-form configuration. | metadata | NO | YES |
-| show_notice | Bool | Show notice field. | string | NO | NO |
-| site_id | UInt32 | Site/brand ID | id | NO | NO |
-| slug | String | Display label. | string | NO | NO |
-| updated_at | DateTime64(6) | Update date/timestamp | datetime | NO | NO |
-| visible_in_control | LowCardinality(String) | Visible in control field. | string | NO | NO |
-
-## Sub Vendors (sub_vendor)
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| code | String | Display label. | category | NO | NO |
-| created_at | DateTime64(6) | Creation date/timestamp | datetime | NO | NO |
-| hide_from_main_grid | Bool | Hide from main grid field. | string | NO | NO |
-| id | UInt32 | Primary key row identifier. | id | NO | NO |
-| image | String | Image field. | string | NO | NO |
-| interface | Int32 | Interface field. | string | NO | NO |
-| is_active | Bool | Boolean flag. | flag | NO | NO |
-| logo_icon | String | Logo icon field. | string | NO | NO |
-| name | String | Display label. | string | NO | NO |
-| order | Int32 | Order field. | string | NO | NO |
-| site_id | UInt32 | Site/brand ID | id | NO | NO |
-| title | String | Display label. | string | NO | NO |
-| updated_at | DateTime64(6) | Update date/timestamp | datetime | NO | NO |
-| vendor_id | UInt32 | Vendor/provider ID | id | NO | NO |
-| vendor_segment_id | UInt16 | Vendor/provider identifier. | id | NO | NO |
-| window_type | LowCardinality(String) | Window type field. | string | NO | NO |
-
-## vendor (vendor)
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| code | String | Display label. | category | NO | NO |
-| id | UInt32 | Primary key row identifier. | id | NO | NO |
-| is_active | Bool | Boolean flag. | flag | NO | NO |
-| is_free_game_possible | Bool | Boolean flag. | flag | NO | NO |
-| name | String | Display label. | string | NO | NO |
-| title | String | Display label. | string | NO | NO |
-| vendor_segment_id | UInt16 | Vendor/provider identifier. | id | NO | NO |
-
-## PHASE 2 TABLES (DO NOT USE YET)
-
-### Client Bonuses (client_bonus) [Phase 2]
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| account_type | LowCardinality(String) | Account type field. | category | NO | NO |
-| applied | Bool | Applied field. | string | NO | NO |
-| balance | Decimal(12, 2) | Balance field. | amount | NO | NO |
-| client_account_id | UInt32 | Identifier / foreign key. | id | NO | NO |
-| client_id | UInt32 | Player ID owning the bonus. | identifier | NO | NO |
-| created_at | UInt32 | Creation date/timestamp | date | NO | NO |
-| diff_amount | Decimal(18, 6) | Diff amount field. | amount | NO | NO |
-| expiration_date | Int32 | Expiration date field. | date | NO | NO |
-| expired_at | UInt32 | Expired at field. | date | NO | NO |
-| factor | Int16 | Factor field. | string | NO | NO |
-| free_round_id | UInt32 | Identifier / foreign key. | id | NO | NO |
-| given_by | UInt32 | Given by field. | string | NO | NO |
-| id | UInt32 | Primary key row identifier. | id | NO | NO |
-| initial_amount | Decimal(12, 2) | Initial amount field. | amount | NO | NO |
-| is_acquired | Bool | Boolean flag. | flag | NO | NO |
-| is_active | Bool | Boolean flag. | flag | NO | NO |
-| is_congregate | Bool | Boolean flag. | flag | NO | NO |
-| is_expired | Bool | Boolean flag. | flag | NO | NO |
-| is_exported | Bool | Boolean flag. | flag | NO | NO |
-| is_maximun_amount_acquired | Bool | Boolean flag. | amount | NO | NO |
-| is_rollover_finished | Bool | Boolean flag. | flag | NO | NO |
-| is_type_rollover | Bool | Boolean flag. | flag | NO | NO |
-| max_acquire_percent | UInt32 | Max acquire percent field. | string | NO | NO |
-| maximun_acquire_amount | Decimal(11, 2) | Maximun acquire amount field. | amount | NO | NO |
-| meta | String | JSON metadata | metadata | NO | YES |
-| payment_transaction_id | Int64 | Payment method/provider identifier. | id | NO | NO |
-| read_status | Bool | Read status field. | string | NO | NO |
-| rollover_amount | Decimal(12, 2) | Rollover amount field. | amount | NO | NO |
-| rollover_percent | Decimal(11, 7) | Rollover percent field. | string | NO | NO |
-| rollovered_amount | Decimal(12, 2) | Rollovered amount field. | amount | NO | NO |
-| site_bonus_id | UInt32 | Identifier / foreign key. | id | NO | NO |
-| status | LowCardinality(String) | Status code | category | NO | NO |
-| transaction_payment_id | Int64 | Payment method/provider identifier. | id | NO | NO |
-| updated_at | UInt32 | Update date/timestamp | date | NO | NO |
-| vendor_segment_id | UInt16 | Vendor/provider identifier. | id | NO | NO |
-
-### client_info (client_info) [Phase 2]
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| address | String | Address field. | pii_identifier | NO | YES |
-| birth_date | Int32 | Birth date field. | date | NO | NO |
-| btag | String | Btag field. | string | NO | NO |
-| casino_tour_id | UInt64 | Identifier / foreign key. | id | NO | NO |
-| city | String | City field. | string | NO | NO |
-| click_id | String | Identifier / foreign key. | id | NO | NO |
-| country_id | UInt32 | Identifier / foreign key. | id | NO | NO |
-| document_number | String | Document number field. | pii_identifier | NO | YES |
-| email | String | Email field. | pii_identifier | NO | YES |
-| first_name | String | First name field. | pii_identifier | NO | YES |
-| first_visit_date | UInt32 | First visit date field. | date | NO | NO |
-| gender | LowCardinality(String) | Gender field. | string | NO | NO |
-| id | UInt32 | Primary key row identifier. | id | NO | NO |
-| language_code | String | Language code field. | string | NO | NO |
-| last_name | String | Last name field. | pii_identifier | NO | YES |
-| phone | String | Phone field. | pii_identifier | NO | YES |
-| pid | String | Pid field. | string | NO | NO |
-| risk_status | LowCardinality(String) | Risk status field. | string | NO | NO |
-| social_number | String | Social number field. | pii_identifier | NO | YES |
-| zip_code | String | Zip code field. | string | NO | NO |
-
-### Client Products (client_product) [Phase 2]
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| client_id | UInt32 | Player ID. | identifier | NO | NO |
-| id | UInt32 | Primary key row identifier. | id | NO | NO |
-| product_alias | String | Product alias field. | string | NO | NO |
-| product_id | UInt64 | Product/vertical ID | id | NO | NO |
-| updated_at | UInt32 | Update date/timestamp | date | NO | NO |
-
-### Client Tags Link (client_tag_client) [Phase 2]
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| client_id | UInt32 | Player ID. | identifier | NO | NO |
-| client_tag_id | UInt64 | Identifier / foreign key. | id | NO | NO |
-| created_at | UInt64 | Creation date/timestamp | date | NO | NO |
-| id | UInt64 | Primary key row identifier. | id | NO | NO |
-| updated_at | UInt64 | Update date/timestamp | date | NO | NO |
-
-### client_tags (client_tags) [Phase 2]
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| color | String | Color field. | string | NO | NO |
-| created_at | UInt64 | Creation date/timestamp | date | NO | NO |
-| id | UInt64 | Primary key row identifier. | id | NO | NO |
-| name | String | Display label. | string | NO | NO |
-| priority | LowCardinality(String) | Priority field. | string | NO | NO |
-| rule_automation_meta | String | Metadata / JSON or free-form configuration. | metadata | NO | YES |
-| site_id | UInt32 | Site/brand ID | id | NO | NO |
-| title | String | Display label. | string | NO | NO |
-| updated_at | UInt64 | Update date/timestamp | date | NO | NO |
-
-### country (country) [Phase 2]
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| code | String | Display label. | category | NO | NO |
-| currency_id | UInt16 | Currency ID | id | NO | NO |
-| id | UInt32 | Primary key row identifier. | id | NO | NO |
-| language_code | String | Language code field. | string | NO | NO |
-| name | String | Display label. | string | NO | NO |
-| time_offset | Int16 | Time offset field. | string | NO | NO |
-
-### Exchange / Rates (exchange) [Phase 2]
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| code | String | Display label. | category | NO | NO |
-| created_at | UInt32 | Creation date/timestamp | date | NO | NO |
-| currency_id | UInt16 | Currency ID | id | NO | NO |
-| deleted_at | Int32 | Deleted at field. | date | NO | NO |
-| icon | String | Icon field. | string | NO | NO |
-| id | UInt32 | Primary key row identifier. | id | NO | NO |
-| is_auto | Bool | Boolean flag. | flag | NO | NO |
-| is_enabled | Bool | Boolean flag. | flag | NO | NO |
-| is_main | Bool | Boolean flag. | flag | NO | NO |
-| name | String | Display label. | string | NO | NO |
-| order | UInt32 | Order field. | string | NO | NO |
-| rate | Decimal(8, 2) | Rate field. | amount | NO | NO |
-| site_id | UInt32 | Site/brand ID | id | NO | NO |
-| updated_at | UInt32 | Update date/timestamp | date | NO | NO |
-
-### Game Reference (game) [Phase 2]
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| bonus_percent_id | UInt32 | Identifier / foreign key. | id | NO | NO |
-| comment | String | Comment field. | string | NO | NO |
-| created_at | DateTime64(6) | Creation date/timestamp | datetime | NO | NO |
-| exported | Bool | Exported field. | flag | NO | NO |
-| external_game_id | String | Identifier / foreign key. | id | NO | NO |
-| free_round_id | String | Identifier / foreign key. | id | NO | NO |
-| game_group_id | UInt32 | Identifier / foreign key. | id | NO | NO |
-| game_id | String | Identifier / foreign key. | id | NO | NO |
-| id | UInt32 | Primary key row identifier. | id | NO | NO |
-| img | String | Img field. | string | NO | NO |
-| img_thumb | String | Img thumb field. | string | NO | NO |
-| is_active | Bool | Boolean flag. | flag | NO | NO |
-| is_bonus_supported | Bool | Boolean flag. | flag | NO | NO |
-| is_demo_supported | Bool | Boolean flag. | flag | NO | NO |
-| is_enabled | Bool | Boolean flag. | flag | NO | NO |
-| is_free_round_supported | Bool | Boolean flag. | flag | NO | NO |
-| is_main | Bool | Boolean flag. | flag | NO | NO |
-| is_mobile | Bool | Boolean flag. | flag | NO | NO |
-| keywords | String | Keywords field. | string | NO | NO |
-| last_updated_by_cms_user_id | UInt32 | Identifier / foreign key. | id | NO | NO |
-| last_updated_date | String | Last updated date field. | date | NO | NO |
-| mobile_thumb | String | Mobile thumb field. | string | NO | NO |
-| order | Int32 | Order field. | string | NO | NO |
-| product_id | UInt32 | Product/vertical ID | id | NO | NO |
-| ratio | String | Ratio field. | string | NO | NO |
-| settings | String | Metadata / JSON or free-form configuration. | metadata | NO | YES |
-| sub_vendor_id | UInt32 | Vendor/provider identifier. | id | NO | NO |
-| table_id | String | Identifier / foreign key. | id | NO | NO |
-| title | String | Display label. | string | NO | NO |
-| updated_at | DateTime64(6) | Update date/timestamp | datetime | NO | NO |
-| vendor_id | UInt32 | Vendor/provider ID | id | NO | NO |
-| vendor_segment_id | Int32 | Vendor/provider identifier. | id | NO | NO |
-| vertical_thumb | String | Vertical thumb field. | string | NO | NO |
-| view_type | LowCardinality(String) | View type field. | category | NO | NO |
-
-### game_tag (game_tag) [Phase 2]
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| id | UInt32 | Primary key row identifier. | id | NO | NO |
-| name | String | Display label. | string | NO | NO |
-
-### m_client_bonus (m_client_bonus) [Phase 2]
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| account_type | String | Account type field. | category | NO | NO |
-| applied | Bool | Applied field. | string | NO | NO |
-| balance | Decimal(12, 2) | Balance field. | amount | NO | NO |
-| client_account_id | UInt32 | Identifier / foreign key. | id | NO | NO |
-| client_id | UInt32 | Identifier used for joins and filtering. | identifier | NO | NO |
-| created_at | UInt32 | Creation date/timestamp | date | NO | NO |
-| expiration_date | Int32 | Expiration date field. | date | NO | NO |
-| expired_at | UInt32 | Expired at field. | date | NO | NO |
-| factor | Int16 | Factor field. | string | NO | NO |
-| free_round_id | UInt32 | Identifier / foreign key. | id | NO | NO |
-| given_by | UInt32 | Given by field. | string | NO | NO |
-| id | UInt32 | Primary key row identifier. | id | NO | NO |
-| initial_amount | Decimal(12, 2) | Initial amount field. | amount | NO | NO |
-| is_acquired | Bool | Boolean flag. | flag | NO | NO |
-| is_active | Bool | Boolean flag. | flag | NO | NO |
-| is_congregate | Bool | Boolean flag. | flag | NO | NO |
-| is_expired | Bool | Boolean flag. | flag | NO | NO |
-| is_exported | Bool | Boolean flag. | flag | NO | NO |
-| is_maximun_amount_acquired | Bool | Boolean flag. | amount | NO | NO |
-| is_rollover_finished | Bool | Boolean flag. | flag | NO | NO |
-| is_type_rollover | Bool | Boolean flag. | flag | NO | NO |
-| max_acquire_percent | UInt32 | Max acquire percent field. | string | NO | NO |
-| maximun_acquire_amount | Decimal(11, 2) | Maximun acquire amount field. | amount | NO | NO |
-| meta | String | JSON metadata | metadata | NO | YES |
-| read_status | Bool | Read status field. | string | NO | NO |
-| rollover_amount | Decimal(12, 2) | Rollover amount field. | amount | NO | NO |
-| rollover_percent | Decimal(11, 7) | Rollover percent field. | string | NO | NO |
-| rollovered_amount | Decimal(12, 2) | Rollovered amount field. | amount | NO | NO |
-| site_bonus_id | UInt32 | Identifier / foreign key. | id | NO | NO |
-| status | String | Status code | category | NO | NO |
-| updated_at | UInt32 | Update date/timestamp | date | NO | NO |
-| vendor_segment_id | UInt16 | Vendor/provider identifier. | id | NO | NO |
-
-### m_client_info (m_client_info) [Phase 2]
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| address | String | Address field. | pii_identifier | NO | YES |
-| birth_date | Int32 | Birth date field. | date | NO | NO |
-| btag | String | Btag field. | string | NO | NO |
-| casino_tour_id | UInt64 | Identifier / foreign key. | id | NO | NO |
-| city | String | City field. | string | NO | NO |
-| click_id | String | Identifier / foreign key. | id | NO | NO |
-| country_id | UInt32 | Identifier / foreign key. | id | NO | NO |
-| document_number | String | Document number field. | pii_identifier | NO | YES |
-| email | String | Email field. | pii_identifier | NO | YES |
-| first_name | String | First name field. | pii_identifier | NO | YES |
-| first_visit_date | UInt32 | First visit date field. | date | NO | NO |
-| gender | String | Gender field. | string | NO | NO |
-| id | UInt32 | Primary key row identifier. | id | NO | NO |
-| language_code | String | Language code field. | string | NO | NO |
-| last_name | String | Last name field. | pii_identifier | NO | YES |
-| phone | String | Phone field. | pii_identifier | NO | YES |
-| pid | String | Pid field. | string | NO | NO |
-| risk_status | String | Risk status field. | string | NO | NO |
-| social_number | String | Social number field. | pii_identifier | NO | YES |
-| zip_code | String | Zip code field. | string | NO | NO |
-
-### m_client_last_bonus_claims (m_client_last_bonus_claims) [Phase 2]
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| claim_date | UInt32 | Claim date field. | date | NO | NO |
-| client_id | UInt32 | Identifier used for joins and filtering. | identifier | NO | NO |
-| id | UInt64 | Primary key row identifier. | id | NO | NO |
-| updated_at | UInt32 | Update date/timestamp | date | NO | NO |
-
-### m_client_product (m_client_product) [Phase 2]
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| client_id | UInt32 | Identifier used for joins and filtering. | identifier | NO | NO |
-| id | UInt32 | Primary key row identifier. | id | NO | NO |
-| product_alias | String | Product alias field. | string | NO | NO |
-| product_id | UInt64 | Product/vertical ID | id | NO | NO |
-| updated_at | UInt32 | Update date/timestamp | date | NO | NO |
-
-### m_client_tag_client (m_client_tag_client) [Phase 2]
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| client_id | UInt32 | Identifier used for joins and filtering. | identifier | NO | NO |
-| client_tag_id | UInt64 | Identifier / foreign key. | id | NO | NO |
-| created_at | UInt64 | Creation date/timestamp | date | NO | NO |
-| id | UInt64 | Primary key row identifier. | id | NO | NO |
-| updated_at | UInt64 | Update date/timestamp | date | NO | NO |
-
-### m_client_tags (m_client_tags) [Phase 2]
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| color | String | Color field. | string | NO | NO |
-| created_at | UInt64 | Creation date/timestamp | date | NO | NO |
-| id | UInt64 | Primary key row identifier. | id | NO | NO |
-| name | String | Display label. | string | NO | NO |
-| priority | String | Priority field. | string | NO | NO |
-| rule_automation_meta | String | Metadata / JSON or free-form configuration. | metadata | NO | YES |
-| site_id | UInt32 | Site/brand ID | id | NO | NO |
-| title | String | Display label. | string | NO | NO |
-| updated_at | UInt64 | Update date/timestamp | date | NO | NO |
-
-### m_country (m_country) [Phase 2]
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| code | String | Display label. | category | NO | NO |
-| currency_id | UInt16 | Currency ID | id | NO | NO |
-| id | UInt32 | Primary key row identifier. | id | NO | NO |
-| language_code | String | Language code field. | string | NO | NO |
-| name | String | Display label. | string | NO | NO |
-| time_offset | Int16 | Time offset field. | string | NO | NO |
-
-### m_exchange (m_exchange) [Phase 2]
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| code | String | Display label. | category | NO | NO |
-| created_at | UInt32 | Creation date/timestamp | date | NO | NO |
-| currency_id | UInt16 | Currency ID | id | NO | NO |
-| deleted_at | Int32 | Deleted at field. | date | NO | NO |
-| icon | String | Icon field. | string | NO | NO |
-| id | UInt32 | Primary key row identifier. | id | NO | NO |
-| is_auto | Bool | Boolean flag. | flag | NO | NO |
-| is_enabled | Bool | Boolean flag. | flag | NO | NO |
-| is_main | Bool | Boolean flag. | flag | NO | NO |
-| name | String | Display label. | string | NO | NO |
-| order | UInt32 | Order field. | string | NO | NO |
-| rate | Decimal(8, 2) | Rate field. | amount | NO | NO |
-| site_id | UInt32 | Site/brand ID | id | NO | NO |
-| updated_at | UInt32 | Update date/timestamp | date | NO | NO |
-
-### m_game (m_game) [Phase 2]
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| bonus_percent_id | UInt32 | Identifier / foreign key. | id | NO | NO |
-| comment | String | Comment field. | string | NO | NO |
-| created_at | DateTime64(6) | Creation date/timestamp | datetime | NO | NO |
-| exported | Bool | Exported field. | flag | NO | NO |
-| external_game_id | String | Identifier / foreign key. | id | NO | NO |
-| free_round_id | String | Identifier / foreign key. | id | NO | NO |
-| game_group_id | UInt32 | Identifier / foreign key. | id | NO | NO |
-| game_id | String | Identifier / foreign key. | id | NO | NO |
-| id | UInt32 | Primary key row identifier. | id | NO | NO |
-| img | String | Img field. | string | NO | NO |
-| img_thumb | String | Img thumb field. | string | NO | NO |
-| is_active | Bool | Boolean flag. | flag | NO | NO |
-| is_bonus_supported | Bool | Boolean flag. | flag | NO | NO |
-| is_demo_supported | Bool | Boolean flag. | flag | NO | NO |
-| is_enabled | Bool | Boolean flag. | flag | NO | NO |
-| is_free_round_supported | Bool | Boolean flag. | flag | NO | NO |
-| is_main | Bool | Boolean flag. | flag | NO | NO |
-| is_mobile | Bool | Boolean flag. | flag | NO | NO |
-| keywords | String | Keywords field. | string | NO | NO |
-| last_updated_by_cms_user_id | UInt32 | Identifier / foreign key. | id | NO | NO |
-| last_updated_date | String | Last updated date field. | date | NO | NO |
-| mobile_thumb | String | Mobile thumb field. | string | NO | NO |
-| order | Int32 | Order field. | string | NO | NO |
-| product_id | UInt32 | Product/vertical ID | id | NO | NO |
-| ratio | String | Ratio field. | string | NO | NO |
-| settings | String | Metadata / JSON or free-form configuration. | metadata | NO | YES |
-| sub_vendor_id | UInt32 | Vendor/provider identifier. | id | NO | NO |
-| table_id | String | Identifier / foreign key. | id | NO | NO |
-| title | String | Display label. | string | NO | NO |
-| updated_at | DateTime64(6) | Update date/timestamp | datetime | NO | NO |
-| vendor_id | UInt32 | Vendor/provider ID | id | NO | NO |
-| vendor_segment_id | Int32 | Vendor/provider identifier. | id | NO | NO |
-| vertical_thumb | String | Vertical thumb field. | string | NO | NO |
-| view_type | String | View type field. | category | NO | NO |
-
-### m_game_tag (m_game_tag) [Phase 2]
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| id | UInt32 | Primary key row identifier. | id | NO | NO |
-| name | String | Display label. | string | NO | NO |
-
-### m_payment (m_payment) [Phase 2]
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| aggregator_name | String | Aggregator name field. | string | NO | NO |
-| form_deposit | String | Form deposit field. | string | NO | NO |
-| form_payout | String | Form payout field. | string | NO | NO |
-| handler | String | Handler field. | string | NO | NO |
-| id | UInt32 | Primary key row identifier. | id | NO | NO |
-| info | String | Info/notes metadata | metadata | NO | YES |
-| is_online | Bool | Boolean flag. | flag | NO | NO |
-| name | String | Display label. | string | NO | NO |
-| slug | String | Display label. | string | NO | NO |
-
-### m_segment (m_segment) [Phase 2]
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| calculated_at | UInt64 | Calculated at field. | date | NO | NO |
-| count | UInt64 | Count field. | string | NO | NO |
-| count_start | UInt64 | Count start field. | string | NO | NO |
-| created_at | UInt64 | Creation date/timestamp | date | NO | NO |
-| created_by | String | Created by field. | string | NO | NO |
-| frequency | String | Frequency field. | string | NO | NO |
-| id | UInt64 | Primary key row identifier. | id | NO | NO |
-| include_locked_clients | UInt8 | Include locked clients field. | string | NO | NO |
-| name | String | Display label. | string | NO | NO |
-| note | String | Note field. | string | NO | NO |
-| site_id | UInt32 | Site/brand ID | id | NO | NO |
-| status | UInt32 | Status code | category | NO | NO |
-| type | String | Type/category | category | NO | NO |
-| update_status | String | Update status field. | string | NO | NO |
-| updated_at | UInt64 | Update date/timestamp | date | NO | NO |
-| updated_by | String | Updated by field. | string | NO | NO |
-
-### m_site_bonus (m_site_bonus) [Phase 2]
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| account_type | String | Account type field. | category | NO | NO |
-| action_type | String | Action type field. | category | NO | NO |
-| bonus_type | String | Bonus type field. | string | NO | NO |
-| claimable_period | Float32 | Claimable period field. | string | NO | NO |
-| created_at | DateTime64(6) | Creation date/timestamp | datetime | NO | NO |
-| default_language | Int32 | Default language field. | string | NO | NO |
-| deleted_at | DateTime64(6) | Deleted at field. | datetime | NO | NO |
-| description | String | Description field. | string | NO | NO |
-| desktop_image | String | Desktop image field. | string | NO | NO |
-| duration | UInt16 | Duration field. | string | NO | NO |
-| end_date | UInt32 | End date field. | date | NO | NO |
-| expiration_period | DateTime64(6) | Expiration period field. | datetime | NO | NO |
-| expiry | UInt32 | Expiry field. | string | NO | NO |
-| icon | String | Icon field. | string | NO | NO |
-| id | UInt32 | Primary key row identifier. | id | NO | NO |
-| image | String | Image field. | string | NO | NO |
-| is_active | Bool | Boolean flag. | flag | NO | NO |
-| is_claimable | Bool | Boolean flag. | flag | NO | NO |
-| is_hidden | Bool | Boolean flag. | flag | NO | NO |
-| is_real_amount_lock | Bool | Boolean flag. | amount | NO | NO |
-| is_request | Bool | Boolean flag. | flag | NO | NO |
-| is_rollover | UInt8 | Boolean flag. | flag | NO | NO |
-| is_single_acquire | Bool | Boolean flag. | flag | NO | NO |
-| is_unique | Bool | Boolean flag. | flag | NO | NO |
-| is_verified | Bool | Boolean flag. | flag | NO | NO |
-| max_receive_factor | UInt16 | Max receive factor field. | string | NO | NO |
-| mobile_image | String | Mobile image field. | string | NO | NO |
-| name | String | Display label. | string | NO | NO |
-| parent_bonus_id | UInt32 | Identifier / foreign key. | id | NO | NO |
-| payment_number | UInt16 | Payment number field. | string | NO | NO |
-| payment_referenced | UInt8 | Payment referenced field. | string | NO | NO |
-| payout_time_range | UInt16 | Payout time range field. | string | NO | NO |
-| priority | UInt8 | Priority field. | string | NO | NO |
-| rollover_with_other | UInt8 | Rollover with other field. | string | NO | NO |
-| schedule | String | Schedule field. | string | NO | NO |
-| site_bonus_preset_id | UInt32 | Identifier / foreign key. | id | NO | NO |
-| site_bonus_type | Int16 | Site bonus type field. | string | NO | NO |
-| site_id | UInt32 | Site/brand ID | id | NO | NO |
-| skip_country | Bool | Skip country field. | string | NO | NO |
-| skip_site_payment | Bool | Skip site payment field. | string | NO | NO |
-| start_date | UInt32 | Start date field. | date | NO | NO |
-| start_time | String | Start time field. | string | NO | NO |
-| updated_at | DateTime64(6) | Update date/timestamp | datetime | NO | NO |
-| wager_type | String | Wager type field. | string | NO | NO |
-| withdraw_access | Bool | Withdraw access field. | string | NO | NO |
-
-### m_site_game_site_tag (m_site_game_site_tag) [Phase 2]
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| id | Int32 | Primary key row identifier. | id | NO | NO |
-| site_game_id | Int32 | Identifier / foreign key. | id | NO | NO |
-| site_tag_id | UInt32 | Identifier / foreign key. | id | NO | NO |
-
-### m_site_tag (m_site_tag) [Phase 2]
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| id | UInt32 | Primary key row identifier. | id | NO | NO |
-| name | String | Display label. | string | NO | NO |
-| site_id | UInt32 | Site/brand ID | id | NO | NO |
-
-### m_site_vendor (m_site_vendor) [Phase 2]
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| id | Int32 | Primary key row identifier. | id | NO | NO |
-| is_main_config | Bool | Boolean flag. | flag | NO | NO |
-| site_id | UInt32 | Site/brand ID | id | NO | NO |
-| vendor_id | UInt32 | Vendor/provider ID | id | NO | NO |
-
-### payment (payment) [Phase 2]
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| aggregator_name | String | Aggregator name field. | string | NO | NO |
-| form_deposit | String | Form deposit field. | string | NO | NO |
-| form_payout | String | Form payout field. | string | NO | NO |
-| handler | LowCardinality(String) | Handler field. | string | NO | NO |
-| id | UInt32 | Primary key row identifier. | id | NO | NO |
-| info | String | Info/notes metadata | metadata | NO | YES |
-| is_online | Bool | Boolean flag. | flag | NO | NO |
-| name | String | Display label. | string | NO | NO |
-| slug | String | Display label. | string | NO | NO |
-
-### Game Tags Link (site_game_site_tag) [Phase 2]
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| id | Int32 | Primary key row identifier. | id | NO | NO |
-| site_game_id | Int32 | Identifier / foreign key. | id | NO | NO |
-| site_tag_id | UInt32 | Identifier / foreign key. | id | NO | NO |
-
-### Site Tags (site_tag) [Phase 2]
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| auto_add | Int8 | Auto add field. | string | NO | NO |
-| game_tags | String | Game tags field. | string | NO | NO |
-| id | UInt32 | Primary key row identifier. | id | NO | NO |
-| name | String | Display label. | string | NO | NO |
-| site_id | UInt32 | Site/brand ID | id | NO | NO |
-
-### site_vendor (site_vendor) [Phase 2]
-
-| column | type | description | semantic_type | nullable | exclude_from_filters |
-|--------|------|-------------|---------------|----------|---------------------|
-| id | Int32 | Primary key row identifier. | id | NO | NO |
-| is_main_config | Bool | Boolean flag. | flag | NO | NO |
-| site_id | UInt32 | Site/brand ID | id | NO | NO |
-| vendor_id | UInt32 | Vendor/provider ID | id | NO | NO |
-
-## OUT-OF-SCOPE TABLES (DO NOT USE)
-
-The following tables must NEVER be used in generated queries:
-client, mt_payment_archive, mt_ts_archive, mv_client_top_wins, payment_sum_by_hour
-`
+WHERE p.type = 'deposit' AND p.status = 5 AND p.is_test = 0 AND p.action_count = 1
+  type=list
+  grain_level=player_level
+  default_filter_behavior=Default filters apply: enforce site_id, exclude is_test=1, success statuses for payments.
+  status_filter_notes=Payments success: status = 5. FTD requires action_count=1.
+  implementation_notes=When user says 'FTD' without qualifier, return this list. Do not aggregate identifiers. Locked: term 'FTD' is treated as alias of FTD List (row-level), not count/amount.
+
+## DIMENSIONS
+[dimension_id=date]
+  name=0
+  type=temporal
+  description=Reporting date (event timestamp).
+  source_tables_columns=mt_transaction_main.created_at_dt; mt_payment_archive.created_at_dt
+  lookup_table=none
+  lookup_key=none
+  display_column=none
+  synonyms=date,day
+  default_filter_behavior=none
+  pii_sensitivity=NONE
+  implementation_notes=If created_at_dt null, fallback to created_at (Date).
+[dimension_id=site]
+  name=1
+  type=entity
+  description=Operator/brand identifier.
+  source_tables_columns=mt_transaction_main.site_id; mt_payment_archive.site_id; m_client.site_id
+  lookup_table=m_site
+  lookup_key=id
+  display_column=name
+  synonyms=site,brand,operator
+  default_filter_behavior=always included
+  pii_sensitivity=NONE
+  implementation_notes=Human-readable names come from brand service (future).
+[dimension_id=currency]
+  name=2
+  type=categorical
+  description=Currency used in transactions.
+  source_tables_columns=mt_transaction_main.currency_id; mt_payment_archive.currency_id
+  lookup_table=currency
+  lookup_key=id
+  display_column=code
+  synonyms=currency,ccy
+  default_filter_behavior=none
+  pii_sensitivity=NONE
+  implementation_notes=
+[dimension_id=product]
+  name=3
+  type=entity
+  description=Vertical: casino, sports, live.
+  source_tables_columns=mt_transaction_main.product_id; site_game.product_id
+  lookup_table=products
+  lookup_key=id
+  display_column=alias
+  synonyms=product,vertical,category
+  default_filter_behavior=none
+  pii_sensitivity=NONE
+  implementation_notes=Ensure archive.product_id ↔ products.id mapping.
+[dimension_id=game]
+  name=4
+  type=entity
+  description=Game title.
+  source_tables_columns=mt_transaction_main.internal_site_game_id; site_game.internal_game_id
+  lookup_table=site_game
+  lookup_key=internal_game_id
+  display_column=title
+  synonyms=game,title,slot
+  default_filter_behavior=none
+  pii_sensitivity=NONE
+  implementation_notes=Cast types if needed (Int32 ↔ UInt64).
+[dimension_id=vendor]
+  name=5
+  type=entity
+  description=Main provider.
+  source_tables_columns=mt_transaction_main.vendor_id; site_game.vendor_id
+  lookup_table=m_vendor
+  lookup_key=id
+  display_column=title
+  synonyms=provider,vendor,game provider
+  default_filter_behavior=none
+  pii_sensitivity=NONE
+  implementation_notes=Requires vendor catalog in future.
+[dimension_id=sub_vendor]
+  name=6
+  type=categorical
+  description=Studio under provider.
+  source_tables_columns=mt_transaction_main.sub_vendor_id; sub_vendor.id
+  lookup_table=sub_vendor
+  lookup_key=id
+  display_column=title
+  synonyms=studio,subvendor
+  default_filter_behavior=none
+  pii_sensitivity=NONE
+  implementation_notes=Must join using site_id.
+[dimension_id=client]
+  name=7
+  type=entity
+  description=Player entity (canonical identity via m_client).
+  source_tables_columns=mt_transaction_main.client_id; mt_payment_archive.client_id; m_client.id
+  lookup_table=m_client
+  lookup_key=id
+  display_column=username
+  synonyms=player,user,client
+  default_filter_behavior=none
+  pii_sensitivity=HIGH
+  implementation_notes=Canonical join: <FACT>.client_id = m_client.id AND <FACT>.site_id = m_client.site_id. Always return player id as toString(<FACT>.client_id) AS client_id and username as m_client.username AS username. Never aggregate identifiers.
+[dimension_id=payment_method]
+  name=8
+  type=categorical
+  description=PSP or payment channel used.
+  source_tables_columns=mt_payment_archive.site_payment_id
+  lookup_table=site_payment
+  lookup_key=id
+  display_column=name
+  synonyms=psp,payment system
+  default_filter_behavior=none
+  pii_sensitivity=NONE
+  implementation_notes=Must join using site_id.
+[dimension_id=is_test_flag]
+  name=9
+  type=flag
+  description=Marks test traffic.
+  source_tables_columns=mt_transaction_main.is_test; m_client.is_test; mt_payment_archive.is_test
+  lookup_table=none
+  lookup_key=none
+  display_column=none
+  synonyms=test,qa
+  default_filter_behavior=EXCLUDE by default
+  pii_sensitivity=NONE
+  implementation_notes=Default filter applied to all KPIs.
+[dimension_id=is_bonus_flag]
+  name=10
+  type=flag
+  description=Marks bets executed with bonus funds.
+  source_tables_columns=mt_transaction_main.is_bonus
+  lookup_table=none
+  lookup_key=none
+  display_column=none
+  synonyms=bonus,bonus play
+  default_filter_behavior=none
+  pii_sensitivity=NONE
+  implementation_notes=Useful in bonus GGR.
+[dimension_id=country]
+  name=11
+  type=categorical
+  description=Player country or geo location
+  source_tables_columns=m_client.meta
+  lookup_table=none
+  lookup_key=none
+  display_column=country_name
+  synonyms=country,geo,region,jurisdiction
+  default_filter_behavior=none
+  pii_sensitivity=LOW
+  implementation_notes=If sourced from player profile metadata (m_client.meta), extract country_name when available. Treat as categorical; aggregate/group only.
+[dimension_id=platform]
+  name=12
+  type=categorical
+  description=Device/platform
+  source_tables_columns=mt_transaction_main.meta
+  lookup_table=none
+  lookup_key=none
+  display_column=platform
+  synonyms=device,channel,platform
+  default_filter_behavior=none
+  pii_sensitivity=NONE
+  implementation_notes=Derived via ETL
+[dimension_id=player_tag]
+  name=13
+  type=entity
+  description=Tags assigned to players
+  source_tables_columns=client_tag_client.client_tag_id
+  lookup_table=site_tag
+  lookup_key=id
+  display_column=name
+  synonyms=tag,label
+  default_filter_behavior=none
+  pii_sensitivity=HIGH
+  implementation_notes=Requires tag link + lookup joins (client_tag_client → site_tag). Enforce site_id match where applicable; use canonical joins.
+[dimension_id=bonus_type]
+  name=14
+  type=categorical
+  description=Type of bonus used
+  source_tables_columns=client_bonus.status
+  lookup_table=none
+  lookup_key=none
+  display_column=bonus_type_name
+  synonyms=bonus type,bonus category
+  default_filter_behavior=none
+  pii_sensitivity=NONE
+  implementation_notes=Requires bonus lifecycle/source table. Use only if the relevant bonus table is present and joined via dictionary-defined joins.
+[dimension_id=registration_date]
+  name=15
+  type=temporal
+  description=Date client registered
+  source_tables_columns=m_client.created_at
+  lookup_table=none
+  lookup_key=none
+  display_column=registration_date
+  synonyms=reg date,signup date
+  default_filter_behavior=none
+  pii_sensitivity=LOW
+  implementation_notes=Use m_client.created_at as registration date. Cast/convert to Date as needed for grouping.
+
+## JOINS
+[join: mt_transaction_main -> m_client]
+  join_type=LEFT
+  on_conditions=mt_transaction_main.client_id = m_client.id AND mt_transaction_main.site_id = m_client.site_id
+  cardinality=many_to_one
+  enforce_site_match=YES
+  join_safety=STRICT
+  cardinality_multiplier=1x
+  notes=Canonical player enrichment
+[join: mt_transaction_main -> currency]
+  join_type=LEFT
+  on_conditions=mt_transaction_main.currency_id = currency.id
+  cardinality=many_to_one
+  enforce_site_match=NO
+  join_safety=FLEXIBLE
+  cardinality_multiplier=1x
+  notes=Currency metadata
+[join: mt_transaction_main -> site_game]
+  join_type=LEFT
+  on_conditions=toUInt32OrNull(mt_transaction_main.internal_site_game_id) = site_game.internal_game_id AND mt_transaction_main.site_id = site_game.site_id
+  cardinality=many_to_one
+  enforce_site_match=YES
+  join_safety=STRICT
+  cardinality_multiplier=1x
+  notes=Main mapping for games
+[join: mt_transaction_main -> sub_vendor]
+  join_type=LEFT
+  on_conditions=mt_transaction_main.sub_vendor_id = sub_vendor.id AND mt_transaction_main.site_id = sub_vendor.site_id
+  cardinality=many_to_one
+  enforce_site_match=YES
+  join_safety=STRICT
+  cardinality_multiplier=1x
+  notes=Studio enrichment
+[join: mt_payment_archive -> m_client]
+  join_type=LEFT
+  on_conditions=mt_payment_archive.client_id = m_client.id AND mt_payment_archive.site_id = m_client.site_id
+  cardinality=many_to_one
+  enforce_site_match=YES
+  join_safety=STRICT
+  cardinality_multiplier=1x
+  notes=Payment→player mapping
+[join: mt_payment_archive -> currency]
+  join_type=LEFT
+  on_conditions=mt_payment_archive.currency_id = currency.id
+  cardinality=many_to_one
+  enforce_site_match=NO
+  join_safety=FLEXIBLE
+  cardinality_multiplier=1x
+  notes=Payment currency
+[join: mt_payment_archive -> site_payment]
+  join_type=LEFT
+  on_conditions=mt_payment_archive.site_payment_id = site_payment.id AND mt_payment_archive.site_id = site_payment.site_id
+  cardinality=many_to_one
+  enforce_site_match=YES
+  join_safety=STRICT
+  cardinality_multiplier=1x
+  notes=Payment method
+[join: client_bonus -> m_client]
+  join_type=LEFT
+  on_conditions=client_bonus.client_id = m_client.id
+  cardinality=many_to_one
+  enforce_site_match=NO
+  join_safety=HIGH_RISK
+  cardinality_multiplier=1x
+  notes=Player enrichment for client_bonus. Table has no site_id; join only on client_id. Use only if client_id is globally unique across sites.
+[join: client_product -> m_client]
+  join_type=LEFT
+  on_conditions=client_product.client_id = m_client.id
+  cardinality=many_to_one
+  enforce_site_match=NO
+  join_safety=HIGH_RISK
+  cardinality_multiplier=1x
+  notes=Player enrichment for client_product. Table has no site_id; join only on client_id. Use only if client_id is globally unique across sites.
+[join: client_product -> products]
+  join_type=LEFT
+  on_conditions=client_product.product_id = products.id
+  cardinality=many_to_one
+  enforce_site_match=NO
+  join_safety=FLEXIBLE
+  cardinality_multiplier=1x
+  notes=Resolve product names
+[join: client_tag_client -> m_client]
+  join_type=LEFT
+  on_conditions=client_tag_client.client_id = m_client.id
+  cardinality=many_to_one
+  enforce_site_match=NO
+  join_safety=HIGH_RISK
+  cardinality_multiplier=3x
+  notes=Attach player tags
+[join: client_tag_client -> client_tags]
+  join_type=LEFT
+  on_conditions=client_tag_client.client_tag_id = client_tags.id
+  cardinality=many_to_one
+  enforce_site_match=NO
+  join_safety=HIGH_RISK
+  cardinality_multiplier=3x
+  notes=Resolve client tag names/titles (player tags). client_tag_client has no site_id; assume tag ids are globally unique; otherwise unsafe.
+[join: site_game_site_tag -> site_game]
+  join_type=LEFT
+  on_conditions=site_game_site_tag.site_game_id = site_game.id
+  cardinality=many_to_one
+  enforce_site_match=NO
+  join_safety=FLEXIBLE
+  cardinality_multiplier=2x
+  notes=Game tagging
+[join: site_game_site_tag -> site_tag]
+  join_type=LEFT
+  on_conditions=site_game_site_tag.site_tag_id = site_tag.id
+  cardinality=many_to_one
+  enforce_site_match=NO
+  join_safety=HIGH_RISK
+  cardinality_multiplier=2x
+  notes=Resolve game tag names. To enforce site match, join via site_game and add site_game.site_id = site_tag.site_id (indirect).
+[join: exchange -> currency]
+  join_type=LEFT
+  on_conditions=exchange.currency_id = currency.id
+  cardinality=many_to_one
+  enforce_site_match=NO
+  join_safety=FLEXIBLE
+  cardinality_multiplier=1x
+  notes=Currency metadata
+[join: mt_transaction_main -> exchange]
+  join_type=LEFT
+  on_conditions=mt_transaction_main.currency_id = exchange.currency_id AND mt_transaction_main.site_id = exchange.site_id
+  cardinality=many_to_one
+  enforce_site_match=YES
+  join_safety=FLEXIBLE
+  cardinality_multiplier=1x
+  notes=FX enrichment
+[join: mt_payment_archive -> exchange]
+  join_type=LEFT
+  on_conditions=mt_payment_archive.currency_id = exchange.currency_id AND mt_payment_archive.site_id = exchange.site_id
+  cardinality=many_to_one
+  enforce_site_match=YES
+  join_safety=FLEXIBLE
+  cardinality_multiplier=1x
+  notes=FX for payments
+
+## DATE_PRESETS
+[preset_id=today]
+  description=Today only
+  notes=Interpretation only; LLM generates SQL using the chosen table time column and its data type.
+[preset_id=yesterday]
+  description=Previous day
+  notes=Interpretation only; LLM generates SQL using the chosen table time column and its data type.
+[preset_id=last_7_days]
+  description=Last 7 days (rolling window)
+  notes=Interpretation only; LLM generates SQL using the chosen table time column and its data type.
+[preset_id=last_30_days]
+  description=Last 30 days (rolling window)
+  notes=Interpretation only; LLM generates SQL using the chosen table time column and its data type.
+[preset_id=this_month]
+  description=Current calendar month
+  notes=Interpretation only; LLM generates SQL using the chosen table time column and its data type.
+[preset_id=previous_month]
+  description=Full previous calendar month
+  notes=Interpretation only; LLM generates SQL using the chosen table time column and its data type.
+[preset_id=last_week]
+  description=Previous calendar week
+  notes=Interpretation only; LLM generates SQL using the chosen table time column and its data type.
+[preset_id=this_week]
+  description=Current calendar week
+  notes=Interpretation only; LLM generates SQL using the chosen table time column and its data type.
+[preset_id=last_month]
+  description=Previous calendar month
+  notes=Interpretation only; LLM generates SQL using the chosen table time column and its data type.
+[preset_id=mtd]
+  description=Month to date
+  notes=Interpretation only; LLM generates SQL using the chosen table time column and its data type.
+[preset_id=ytd]
+  description=Year to date
+  notes=Interpretation only; LLM generates SQL using the chosen table time column and its data type.
+
+## SEMANTIC_ALIASES
+  phrase="revenue" -> maps_to=metric.ggr,metric.net_deposits | strategy=ask_user | clarification="Do you mean GGR (bets−wins) or Net Deposits (cash in−cash out)?" | notes=Critical ambiguous term
+  phrase="profit" -> maps_to=metric.ggr,metric.net_deposits | strategy=ask_user | clarification="Do you mean gaming profit (GGR) or cash flow profit (Net Deposits)?"
+  phrase="turnover" -> maps_to=metric.bets_amount | strategy=direct | default_id=bets_amount | notes=Default meaning = stakes
+  phrase="stakes" -> maps_to=metric.bets_amount | strategy=direct | default_id=bets_amount
+  phrase="active players" -> maps_to=metric.active_players_bets | strategy=direct | default_id=active_players_bets | notes=Defined as “players who placed bets”
+  phrase="cash in" -> maps_to=metric.deposits_amount | strategy=direct | default_id=deposits_amount
+  phrase="cash out" -> maps_to=metric.withdrawals_amount | strategy=direct | default_id=withdrawals_amount
+  phrase="losing players" -> maps_to=unsupported | strategy=off_topic | notes=Non-canonical derived concept; must be implemented as a real metric/segment in dictionary before LLM can generate SQL.
+  phrase="big players" -> maps_to=unsupported | strategy=off_topic | notes=Non-canonical derived concept; must be implemented as a real metric/segment in dictionary before LLM can generate SQL.
+  phrase="Armenia" -> maps_to=dimension.country='AM' | strategy=direct | default_id=country | notes=For geo filters
+  phrase="ggr" -> maps_to=metric.ggr | strategy=direct | default_id=ggr | notes=Synonym for GGR
+  phrase="gross gaming revenue" -> maps_to=metric.ggr | strategy=direct | default_id=ggr | notes=Synonym for GGR
+  phrase="gross revenue from games" -> maps_to=metric.ggr | strategy=direct | default_id=ggr | notes=Synonym for GGR
+  phrase="gaming revenue" -> maps_to=metric.ggr | strategy=direct | default_id=ggr | notes=Synonym for GGR
+  phrase="game revenue" -> maps_to=metric.ggr | strategy=direct | default_id=ggr | notes=Synonym for GGR
+  phrase="house win" -> maps_to=metric.ggr | strategy=direct | default_id=ggr | notes=Synonym for GGR
+  phrase="operator win" -> maps_to=metric.ggr | strategy=direct | default_id=ggr | notes=Synonym for GGR
+  phrase="gross win" -> maps_to=metric.ggr | strategy=direct | default_id=ggr | notes=Synonym for GGR
+  phrase="net gaming revenue" -> maps_to=metric.ngr | strategy=direct | default_id=ngr | notes=Synonym for NGR
+  phrase="net revenue from games" -> maps_to=metric.ngr | strategy=direct | default_id=ngr | notes=Synonym for NGR
+  phrase="net game revenue" -> maps_to=metric.ngr | strategy=direct | default_id=ngr | notes=Synonym for NGR
+  phrase="net win" -> maps_to=metric.ngr | strategy=direct | default_id=ngr | notes=Synonym for NGR
+  phrase="operator net revenue" -> maps_to=metric.ngr | strategy=direct | default_id=ngr | notes=Synonym for NGR
+  phrase="net profit" -> maps_to=metric.ggr,metric.ngr | strategy=ask_user | clarification="Do you mean GGR (gross gaming revenue) or NGR (net gaming revenue after costs)?" | notes=High-level profit concept; requires clarification
+  phrase="profitability" -> maps_to=metric.ggr,metric.ngr | strategy=ask_user | clarification="Do you mean GGR (gross gaming revenue) or NGR (net gaming revenue after costs)?" | notes=High-level profit concept; requires clarification
+  phrase="overall profit" -> maps_to=metric.ggr,metric.ngr | strategy=ask_user | clarification="Do you mean GGR (gross gaming revenue) or NGR (net gaming revenue after costs)?" | notes=High-level profit concept; requires clarification
+  phrase="casino profit" -> maps_to=metric.ggr,metric.ngr | strategy=ask_user | clarification="Do you mean GGR (gross gaming revenue) or NGR (net gaming revenue after costs)?" | notes=High-level profit concept; requires clarification
+  phrase="sportsbook profit" -> maps_to=metric.ggr,metric.ngr | strategy=ask_user | clarification="Do you mean GGR (gross gaming revenue) or NGR (net gaming revenue after costs)?" | notes=High-level profit concept; requires clarification
+  phrase="bet amount" -> maps_to=metric.bets_amount | strategy=direct | default_id=bets_amount | notes=Synonym for total bet amount
+  phrase="bet volume" -> maps_to=metric.bets_amount | strategy=direct | default_id=bets_amount | notes=Synonym for total bet amount
+  phrase="betting volume" -> maps_to=metric.bets_amount | strategy=direct | default_id=bets_amount | notes=Synonym for total bet amount
+  phrase="stakes volume" -> maps_to=metric.bets_amount | strategy=direct | default_id=bets_amount | notes=Synonym for total bet amount
+  phrase="staking volume" -> maps_to=metric.bets_amount | strategy=direct | default_id=bets_amount | notes=Synonym for total bet amount
+  phrase="total stakes" -> maps_to=metric.bets_amount | strategy=direct | default_id=bets_amount | notes=Synonym for total bet amount
+  phrase="total bet amount" -> maps_to=metric.bets_amount | strategy=direct | default_id=bets_amount | notes=Synonym for total bet amount
+  phrase="bets count" -> maps_to=metric.bets_count | strategy=direct | default_id=bets_count | notes=Synonym for bets_count
+  phrase="number of bets" -> maps_to=metric.bets_count | strategy=direct | default_id=bets_count | notes=Synonym for bets_count
+  phrase="bet count" -> maps_to=metric.bets_count | strategy=direct | default_id=bets_count | notes=Synonym for bets_count
+  phrase="total bets placed" -> maps_to=metric.bets_count | strategy=direct | default_id=bets_count | notes=Synonym for bets_count
+  phrase="wins amount" -> maps_to=metric.wins_amount | strategy=direct | default_id=wins_amount | notes=Synonym for wins_amount
+  phrase="total wins" -> maps_to=metric.wins_amount | strategy=direct | default_id=wins_amount | notes=Synonym for wins_amount
+  phrase="total player wins" -> maps_to=metric.wins_amount | strategy=direct | default_id=wins_amount | notes=Synonym for wins_amount
+  phrase="player winnings" -> maps_to=metric.wins_amount | strategy=direct | default_id=wins_amount | notes=Synonym for wins_amount
+  phrase="winnings" -> maps_to=metric.wins_amount | strategy=direct | default_id=wins_amount | notes=Synonym for wins_amount
+  phrase="payouts from games" -> maps_to=metric.wins_amount | strategy=direct | default_id=wins_amount | notes=Synonym for wins_amount
+  phrase="deposits" -> maps_to=metric.deposits_amount | strategy=direct | default_id=deposits_amount | notes=Synonym for deposits_amount
+  phrase="deposit volume" -> maps_to=metric.deposits_amount | strategy=direct | default_id=deposits_amount | notes=Synonym for deposits_amount
+  phrase="total deposits" -> maps_to=metric.deposits_amount | strategy=direct | default_id=deposits_amount | notes=Synonym for deposits_amount
+  phrase="player deposits" -> maps_to=metric.deposits_amount | strategy=direct | default_id=deposits_amount | notes=Synonym for deposits_amount
+  phrase="cash-in volume" -> maps_to=metric.deposits_amount | strategy=direct | default_id=deposits_amount | notes=Synonym for deposits_amount
+  phrase="top ups" -> maps_to=metric.deposits_amount | strategy=direct | default_id=deposits_amount | notes=Synonym for deposits_amount
+  phrase="top-ups" -> maps_to=metric.deposits_amount | strategy=direct | default_id=deposits_amount | notes=Synonym for deposits_amount
+  phrase="withdrawals" -> maps_to=metric.withdrawals_amount | strategy=direct | default_id=withdrawals_amount | notes=Synonym for withdrawals_amount
+  phrase="withdrawal volume" -> maps_to=metric.withdrawals_amount | strategy=direct | default_id=withdrawals_amount | notes=Synonym for withdrawals_amount
+  phrase="total withdrawals" -> maps_to=metric.withdrawals_amount | strategy=direct | default_id=withdrawals_amount | notes=Synonym for withdrawals_amount
+  phrase="cashouts" -> maps_to=metric.withdrawals_amount | strategy=direct | default_id=withdrawals_amount | notes=Synonym for withdrawals_amount
+  phrase="cash-outs" -> maps_to=metric.withdrawals_amount | strategy=direct | default_id=withdrawals_amount | notes=Synonym for withdrawals_amount
+  phrase="payout volume" -> maps_to=metric.withdrawals_amount | strategy=direct | default_id=withdrawals_amount | notes=Synonym for withdrawals_amount
+  phrase="payouts to players" -> maps_to=metric.withdrawals_amount | strategy=direct | default_id=withdrawals_amount | notes=Synonym for withdrawals_amount
+  phrase="net deposits" -> maps_to=metric.net_deposits | strategy=direct | default_id=net_deposits | notes=Synonym for net_deposits
+  phrase="net cash in" -> maps_to=metric.net_deposits | strategy=direct | default_id=net_deposits | notes=Synonym for net_deposits
+  phrase="deposits minus withdrawals" -> maps_to=metric.net_deposits | strategy=direct | default_id=net_deposits | notes=Synonym for net_deposits
+  phrase="net cashflow from payments" -> maps_to=metric.net_deposits | strategy=direct | default_id=net_deposits | notes=Synonym for net_deposits
+  phrase="new depositing players" -> maps_to=metric.ftd_count | strategy=direct | default_id=ftd_count | notes=Synonym for ftd_count
+  phrase="First Time Depositors" -> maps_to=metric.ftd_list | strategy=direct | default_id=ftd_list | notes=Locked rule: 'FTD' is synonymous with 'FTD List' and always returns the row-level first-time depositor list (type='deposit', status = 5, is_test=0, action_count=1).
+  phrase="First-Time Depositors" -> maps_to=metric.ftd_list | strategy=direct | default_id=ftd_list | notes=Locked rule: 'FTD' is synonymous with 'FTD List' and always returns the row-level first-time depositor list (type='deposit', status = 5, is_test=0, action_count=1).
+  phrase="ftd count" -> maps_to=metric.ftd_count | strategy=direct | default_id=ftd_count | notes=Explicit aggregation: distinct players with first successful deposit (action_count=1, status = 5, is_test=0).
+  phrase="number of ftds" -> maps_to=metric.ftd_count | strategy=direct | default_id=ftd_count | notes=Synonym for ftd_count
+  phrase="new depositors" -> maps_to=metric.ftd_count | strategy=direct | default_id=ftd_count | notes=Synonym for ftd_count
+  phrase="ftd amount" -> maps_to=metric.ftd_amount | strategy=direct | default_id=ftd_amount | notes=Explicit aggregation: sum of amount for first successful deposits (action_count=1, status = 5, is_test=0).
+  phrase="first deposit amount total" -> maps_to=metric.ftd_amount | strategy=direct | default_id=ftd_amount | notes=Synonym for ftd_amount
+  phrase="total first deposits" -> maps_to=metric.ftd_amount | strategy=direct | default_id=ftd_amount | notes=Synonym for ftd_amount
+  phrase="ftd value" -> maps_to=metric.ftd_amount | strategy=direct | default_id=ftd_amount | notes=Synonym for ftd_amount
+  phrase="active bettors" -> maps_to=metric.active_players_bets | strategy=direct | default_id=active_players_bets | notes=Synonym for active_players_bets
+  phrase="betting players" -> maps_to=metric.active_players_bets | strategy=direct | default_id=active_players_bets | notes=Synonym for active_players_bets
+  phrase="players who placed bets" -> maps_to=metric.active_players_bets | strategy=direct | default_id=active_players_bets | notes=Synonym for active_players_bets
+  phrase="unique active players" -> maps_to=metric.active_players_bets | strategy=direct | default_id=active_players_bets | notes=Synonym for active_players_bets
+  phrase="real money players" -> maps_to=metric.active_players_bets | strategy=direct | default_id=active_players_bets | notes=Synonym for active_players_bets
+  phrase="depositing players" -> maps_to=metric.unique_depositors | strategy=direct | default_id=unique_depositors | notes=Synonym for unique_depositors
+  phrase="unique depositors" -> maps_to=metric.unique_depositors | strategy=direct | default_id=unique_depositors | notes=Synonym for unique_depositors
+  phrase="unique depositing players" -> maps_to=metric.unique_depositors | strategy=direct | default_id=unique_depositors | notes=Synonym for unique_depositors
+  phrase="unique cash-in players" -> maps_to=metric.unique_depositors | strategy=direct | default_id=unique_depositors | notes=Synonym for unique_depositors
+  phrase="return to player" -> maps_to=metric.rtp | strategy=direct | default_id=rtp | notes=Synonym for RTP
+  phrase="rtp percentage" -> maps_to=metric.rtp | strategy=direct | default_id=rtp | notes=Synonym for RTP
+  phrase="payout percentage" -> maps_to=metric.rtp | strategy=direct | default_id=rtp | notes=Synonym for RTP
+  phrase="payback" -> maps_to=metric.rtp | strategy=direct | default_id=rtp | notes=Synonym for RTP
+  phrase="payback percentage" -> maps_to=metric.rtp | strategy=direct | default_id=rtp | notes=Synonym for RTP
+  phrase="hold" -> maps_to=metric.ggr_margin | strategy=direct | default_id=ggr_margin | notes=Synonym for GGR margin
+  phrase="hold percentage" -> maps_to=metric.ggr_margin | strategy=direct | default_id=ggr_margin | notes=Synonym for GGR margin
+  phrase="house edge" -> maps_to=metric.ggr_margin | strategy=direct | default_id=ggr_margin | notes=Synonym for GGR margin
+  phrase="house margin" -> maps_to=metric.ggr_margin | strategy=direct | default_id=ggr_margin | notes=Synonym for GGR margin
+  phrase="margin" -> maps_to=metric.ggr_margin,metric.ggr | strategy=ask_user | clarification="Do you mean GGR margin (GGR / stakes) or absolute GGR?" | notes=Generic margin term; clarification required
+  phrase="average bet" -> maps_to=metric.avg_bet | strategy=direct | default_id=avg_bet | notes=Synonym for avg_bet
+  phrase="average bet size" -> maps_to=metric.avg_bet | strategy=direct | default_id=avg_bet | notes=Synonym for avg_bet
+  phrase="average stake" -> maps_to=metric.avg_bet | strategy=direct | default_id=avg_bet | notes=Synonym for avg_bet
+  phrase="avg bet" -> maps_to=metric.avg_bet | strategy=direct | default_id=avg_bet | notes=Synonym for avg_bet
+  phrase="avg stake" -> maps_to=metric.avg_bet | strategy=direct | default_id=avg_bet | notes=Synonym for avg_bet
+  phrase="hold from deposits" -> maps_to=metric.hold_from_deposits | strategy=direct | default_id=hold_from_deposits | notes=Synonym for hold_from_deposits
+  phrase="profit over deposits" -> maps_to=metric.hold_from_deposits | strategy=direct | default_id=hold_from_deposits | notes=Synonym for hold_from_deposits
+  phrase="ggr over deposits" -> maps_to=metric.hold_from_deposits | strategy=direct | default_id=hold_from_deposits | notes=Synonym for hold_from_deposits
+  phrase="gaming yield on deposits" -> maps_to=metric.hold_from_deposits | strategy=direct | default_id=hold_from_deposits | notes=Synonym for hold_from_deposits
+  phrase="bonus stakes" -> maps_to=metric.bonus_turnover | strategy=direct | default_id=bonus_turnover | notes=Synonym for bonus_turnover
+  phrase="bonus betting volume" -> maps_to=metric.bonus_turnover | strategy=direct | default_id=bonus_turnover | notes=Synonym for bonus_turnover
+  phrase="bonus turnover" -> maps_to=metric.bonus_turnover | strategy=direct | default_id=bonus_turnover | notes=Synonym for bonus_turnover
+  phrase="wagering volume from bonus" -> maps_to=metric.bonus_turnover | strategy=direct | default_id=bonus_turnover | notes=Synonym for bonus_turnover
+  phrase="bonus ggr share" -> maps_to=metric.bonus_share_of_ggr | strategy=direct | default_id=bonus_share_of_ggr | notes=Synonym for bonus_share_of_ggr
+  phrase="bonus contribution" -> maps_to=metric.bonus_share_of_ggr | strategy=direct | default_id=bonus_share_of_ggr | notes=Synonym for bonus_share_of_ggr
+  phrase="bonus share of revenue" -> maps_to=metric.bonus_share_of_ggr | strategy=direct | default_id=bonus_share_of_ggr | notes=Synonym for bonus_share_of_ggr
+  phrase="bonus impact on ggr" -> maps_to=metric.bonus_share_of_ggr | strategy=direct | default_id=bonus_share_of_ggr | notes=Synonym for bonus_share_of_ggr
+  phrase="country" -> maps_to=dimension.country | strategy=direct | default_id=country | notes=Country dimension
+  phrase="geo" -> maps_to=dimension.country | strategy=direct | default_id=country | notes=Country dimension
+  phrase="jurisdiction" -> maps_to=dimension.country | strategy=direct | default_id=country | notes=Country dimension
+  phrase="market" -> maps_to=dimension.country | strategy=direct | default_id=country | notes=Country dimension
+  phrase="region" -> maps_to=dimension.country | strategy=direct | default_id=country | notes=Country dimension
+  phrase="territory" -> maps_to=dimension.country | strategy=direct | default_id=country | notes=Country dimension
+  phrase="vendor" -> maps_to=dimension.vendor | strategy=direct | default_id=vendor | notes=Vendor / provider dimension
+  phrase="provider" -> maps_to=dimension.vendor | strategy=direct | default_id=vendor | notes=Vendor / provider dimension
+  phrase="studio" -> maps_to=dimension.vendor | strategy=direct | default_id=vendor | notes=Vendor / provider dimension
+  phrase="game provider" -> maps_to=dimension.vendor | strategy=direct | default_id=vendor | notes=Vendor / provider dimension
+  phrase="content provider" -> maps_to=dimension.vendor | strategy=direct | default_id=vendor | notes=Vendor / provider dimension
+  phrase="game" -> maps_to=dimension.game | strategy=direct | default_id=game | notes=Game dimension
+  phrase="game title" -> maps_to=dimension.game | strategy=direct | default_id=game | notes=Game dimension
+  phrase="title" -> maps_to=dimension.game | strategy=direct | default_id=game | notes=Game dimension
+  phrase="slot" -> maps_to=dimension.game | strategy=direct | default_id=game | notes=Game dimension
+  phrase="casino game" -> maps_to=dimension.game | strategy=direct | default_id=game | notes=Game dimension
+  phrase="product" -> maps_to=dimension.product | strategy=direct | default_id=product | notes=Product/vertical dimension
+  phrase="vertical" -> maps_to=dimension.product | strategy=direct | default_id=product | notes=Product/vertical dimension
+  phrase="brand product" -> maps_to=dimension.product | strategy=direct | default_id=product | notes=Product/vertical dimension
+  phrase="channel product" -> maps_to=dimension.product | strategy=direct | default_id=product | notes=Product/vertical dimension
+  phrase="brand" -> maps_to=dimension.site | strategy=direct | default_id=site | notes=Brand/site dimension
+  phrase="site" -> maps_to=dimension.site | strategy=direct | default_id=site | notes=Brand/site dimension
+  phrase="operator brand" -> maps_to=dimension.site | strategy=direct | default_id=site | notes=Brand/site dimension
+  phrase="website" -> maps_to=dimension.site | strategy=direct | default_id=site | notes=Brand/site dimension
+  phrase="platform" -> maps_to=dimension.platform | strategy=direct | default_id=platform | notes=Platform/device dimension
+  phrase="device" -> maps_to=dimension.platform | strategy=direct | default_id=platform | notes=Platform/device dimension
+  phrase="channel" -> maps_to=dimension.platform | strategy=direct | default_id=platform | notes=Platform/device dimension
+  phrase="mobile vs desktop" -> maps_to=dimension.platform | strategy=direct | default_id=platform | notes=Platform/device dimension
+  phrase="os platform" -> maps_to=dimension.platform | strategy=direct | default_id=platform | notes=Platform/device dimension
+  phrase="segment" -> maps_to=dimension.segment | strategy=direct | default_id=segment | notes=Segment dimension
+  phrase="player segment" -> maps_to=dimension.segment | strategy=direct | default_id=segment | notes=Segment dimension
+  phrase="cohort" -> maps_to=dimension.segment | strategy=direct | default_id=segment | notes=Segment dimension
+  phrase="cluster" -> maps_to=dimension.segment | strategy=direct | default_id=segment | notes=Segment dimension
+  phrase="customer segment" -> maps_to=dimension.segment | strategy=direct | default_id=segment | notes=Segment dimension
+  phrase="player tag" -> maps_to=dimension.player_tag | strategy=direct | default_id=player_tag | notes=Player tag dimension
+  phrase="tag" -> maps_to=dimension.player_tag | strategy=direct | default_id=player_tag | notes=Player tag dimension
+  phrase="label" -> maps_to=dimension.player_tag | strategy=direct | default_id=player_tag | notes=Player tag dimension
+  phrase="player label" -> maps_to=dimension.player_tag | strategy=direct | default_id=player_tag | notes=Player tag dimension
+  phrase="currency" -> maps_to=dimension.currency | strategy=direct | default_id=currency | notes=Currency dimension
+  phrase="currency code" -> maps_to=dimension.currency | strategy=direct | default_id=currency | notes=Currency dimension
+  phrase="ccy" -> maps_to=dimension.currency | strategy=direct | default_id=currency | notes=Currency dimension
+  phrase="registration date" -> maps_to=dimension.registration_date | strategy=direct | default_id=registration_date | notes=Registration date dimension
+  phrase="signup date" -> maps_to=dimension.registration_date | strategy=direct | default_id=registration_date | notes=Registration date dimension
+  phrase="reg date" -> maps_to=dimension.registration_date | strategy=direct | default_id=registration_date | notes=Registration date dimension
+  phrase="slots" -> maps_to=filter.product=casino,filter.game_category=slots | strategy=direct | default_id=filter | notes=Slots category filter
+  phrase="slot games" -> maps_to=filter.product=casino,filter.game_category=slots | strategy=direct | default_id=filter | notes=Slots category filter
+  phrase="video slots" -> maps_to=filter.product=casino,filter.game_category=slots | strategy=direct | default_id=filter | notes=Slots category filter
+  phrase="table games" -> maps_to=filter.product=casino,filter.game_category=table_games | strategy=direct | default_id=filter | notes=Table games category
+  phrase="roulette and blackjack" -> maps_to=filter.product=casino,filter.game_category=table_games | strategy=direct | default_id=filter | notes=Table games category
+  phrase="casino tables" -> maps_to=filter.product=casino,filter.game_category=table_games | strategy=direct | default_id=filter | notes=Table games category
+  phrase="live casino" -> maps_to=filter.product=casino,filter.game_category=live_casino | strategy=direct | default_id=filter | notes=Live casino category
+  phrase="live dealer games" -> maps_to=filter.product=casino,filter.game_category=live_casino | strategy=direct | default_id=filter | notes=Live casino category
+  phrase="live tables" -> maps_to=filter.product=casino,filter.game_category=live_casino | strategy=direct | default_id=filter | notes=Live casino category
+  phrase="today" -> maps_to=date_preset.today | strategy=direct | default_id=today | notes=Time range preset
+  phrase="for today" -> maps_to=date_preset.today | strategy=direct | default_id=today | notes=Time range preset
+  phrase="today only" -> maps_to=date_preset.today | strategy=direct | default_id=today | notes=Time range preset
+  phrase="yesterday" -> maps_to=date_preset.yesterday | strategy=direct | default_id=yesterday | notes=Time range preset
+  phrase="previous day" -> maps_to=date_preset.yesterday | strategy=direct | default_id=yesterday | notes=Time range preset
+  phrase="day before today" -> maps_to=date_preset.yesterday | strategy=direct | default_id=yesterday | notes=Time range preset
+  phrase="last 7 days" -> maps_to=date_preset.last_7_days | strategy=direct | default_id=last_7_days | notes=Time range preset
+  phrase="past 7 days" -> maps_to=date_preset.last_7_days | strategy=direct | default_id=last_7_days | notes=Time range preset
+  phrase="previous 7 days" -> maps_to=date_preset.last_7_days | strategy=direct | default_id=last_7_days | notes=Time range preset
+  phrase="last week" -> maps_to=date_preset.last_week | strategy=direct | default_id=last_week | notes=Time range preset
+  phrase="past week" -> maps_to=date_preset.last_week | strategy=direct | default_id=last_week | notes=Time range preset
+  phrase="this week" -> maps_to=date_preset.this_week | strategy=direct | default_id=this_week | notes=Time range preset
+  phrase="current week" -> maps_to=date_preset.this_week | strategy=direct | default_id=this_week | notes=Time range preset
+  phrase="last 30 days" -> maps_to=date_preset.last_30_days | strategy=direct | default_id=last_30_days | notes=Time range preset
+  phrase="past 30 days" -> maps_to=date_preset.last_30_days | strategy=direct | default_id=last_30_days | notes=Time range preset
+  phrase="this month" -> maps_to=date_preset.this_month | strategy=direct | default_id=this_month | notes=Time range preset
+  phrase="current month" -> maps_to=date_preset.this_month | strategy=direct | default_id=this_month | notes=Time range preset
+  phrase="last month" -> maps_to=date_preset.last_month | strategy=direct | default_id=last_month | notes=Time range preset
+  phrase="month to date" -> maps_to=date_preset.mtd | strategy=direct | default_id=mtd | notes=Time range preset
+  phrase="mtd" -> maps_to=date_preset.mtd | strategy=direct | default_id=mtd | notes=Time range preset
+  phrase="year to date" -> maps_to=date_preset.ytd | strategy=direct | default_id=ytd | notes=Time range preset
+  phrase="ytd" -> maps_to=date_preset.ytd | strategy=direct | default_id=ytd | notes=Time range preset
+  phrase="performance" -> maps_to=metric.ggr,metric.ngr,metric.active_players_bets | strategy=ask_user | clarification="When you say performance, do you mean revenue (GGR/NGR), activity (active players), or another KPI?" | notes=High-level business term; requires clarification
+  phrase="activity" -> maps_to=metric.active_players_bets,metric.bets_count | strategy=ask_user | clarification="Do you mean number of active players, number of bets, or another activity metric?" | notes=High-level business term; requires clarification
+  phrase="volume" -> maps_to=metric.bets_amount,metric.deposits_amount | strategy=ask_user | clarification="Do you mean bet volume (stakes) or deposits volume?" | notes=High-level business term; requires clarification
+  phrase="engagement" -> maps_to=metric.active_players_bets | strategy=ask_user | clarification="Do you mean active players, sessions, or another engagement KPI?" | notes=High-level business term; requires clarification
+  phrase="growth" -> maps_to=metric.ggr,metric.deposits_amount | strategy=ask_user | clarification="Do you mean GGR growth, deposits growth, or overall players growth?" | notes=High-level business term; requires clarification
+  phrase="players" -> maps_to=metric.active_players_bets | strategy=direct | default_id=active_players_bets | notes=v1.2.1 default mapping.
+  phrase="player" -> maps_to=metric.active_players_bets | strategy=direct | default_id=active_players_bets | notes=v1.2.1 default mapping.
+  phrase="new players" -> maps_to=metric.registered_players | strategy=direct | default_id=registered_players | notes=v1.2.1 default mapping.
+  phrase="new player" -> maps_to=metric.registered_players | strategy=direct | default_id=registered_players | notes=v1.2.1 default mapping.
+  phrase="new clients" -> maps_to=metric.registered_players | strategy=direct | default_id=registered_players | notes=v1.2.1 default mapping.
+  phrase="registrations" -> maps_to=metric.registered_players | strategy=direct | default_id=registered_players | notes=v1.2.1 default mapping.
+  phrase="signups" -> maps_to=metric.registered_players | strategy=direct | default_id=registered_players | notes=v1.2.1 default mapping.
+  phrase="registered players" -> maps_to=metric.registered_players | strategy=direct | default_id=registered_players | notes=v1.2.1 default mapping.
+  phrase="user" -> maps_to=dimension.player | strategy=direct | notes=Resolve to Player dimension so output uses canonical player identity (id as text + usernameLink).
+  phrase="users" -> maps_to=dimension.player | strategy=direct | notes=Resolve to Player dimension so output uses canonical player identity (id as text + usernameLink).
+  phrase="client" -> maps_to=dimension.player | strategy=direct | notes=Resolve to Player dimension so output uses canonical player identity (id as text + usernameLink).
+  phrase="clients" -> maps_to=dimension.player | strategy=direct | notes=Resolve to Player dimension so output uses canonical player identity (id as text + usernameLink).
+  phrase="player id" -> maps_to=dimension.player | strategy=direct | notes=Resolve to Player dimension so output uses canonical player identity (id as text + usernameLink).
+  phrase="player_id" -> maps_to=dimension.player | strategy=direct | notes=Resolve to Player dimension so output uses canonical player identity (id as text + usernameLink).
+  phrase="client id" -> maps_to=dimension.player | strategy=direct | notes=Resolve to Player dimension so output uses canonical player identity (id as text + usernameLink).
+  phrase="client_id" -> maps_to=dimension.player | strategy=direct | notes=Resolve to Player dimension so output uses canonical player identity (id as text + usernameLink).
+  phrase="user id" -> maps_to=dimension.player | strategy=direct | notes=Resolve to Player dimension so output uses canonical player identity (id as text + usernameLink).
+  phrase="userid" -> maps_to=dimension.player | strategy=direct | notes=Resolve to Player dimension so output uses canonical player identity (id as text + usernameLink).
+  phrase="account id" -> maps_to=dimension.player | strategy=direct | notes=Resolve to Player dimension so output uses canonical player identity (id as text + usernameLink).
+  phrase="account_id" -> maps_to=dimension.player | strategy=direct | notes=Resolve to Player dimension so output uses canonical player identity (id as text + usernameLink).
+  phrase="username" -> maps_to=dimension.player | strategy=direct | notes=Mapped to Player dimension; username rendered as usernameLink via Player_Identity rules.
+  phrase="user name" -> maps_to=dimension.player | strategy=direct | notes=Mapped to Player dimension; username rendered as usernameLink via Player_Identity rules.
+  phrase="login" -> maps_to=dimension.player | strategy=direct | notes=Mapped to Player dimension; username rendered as usernameLink via Player_Identity rules.
+  phrase="nickname" -> maps_to=dimension.player | strategy=direct | notes=Mapped to Player dimension; username rendered as usernameLink via Player_Identity rules.
+  phrase="test" -> maps_to=dimension.test_flag=1 | strategy=direct | notes=Filter to test data only.
+  phrase="real" -> maps_to=dimension.test_flag=0 | strategy=direct | clarification="Do you also want to exclude bonus play (non-bonus only)?" | notes=By default excludes test; to exclude bonus too use 'real (non-bonus)'.
+  phrase="non test" -> maps_to=dimension.test_flag=0 | strategy=direct | notes=Exclude test data.
+  phrase="non-test" -> maps_to=dimension.test_flag=0 | strategy=direct | notes=Exclude test data.
+  phrase="bonus" -> maps_to=dimension.bonus_flag=1 | strategy=direct | notes=Include bonus play only when used as filter.
+  phrase="non bonus" -> maps_to=dimension.bonus_flag=0 | strategy=direct | notes=Exclude bonus play.
+  phrase="non-bonus" -> maps_to=dimension.bonus_flag=0 | strategy=direct | notes=Exclude bonus play.
+  phrase="rollback" -> maps_to=filter.is_rollback=1 | strategy=direct | notes=Rollback/reversal filter maps to is_rollback=1 on transaction facts.
+  phrase="successful deposits" -> maps_to=filter.payment_success | strategy=direct | notes=Payment success is status = 5 and is_test=0 (canonical).
+  phrase="successful deposit" -> maps_to=filter.payment_success | strategy=direct | notes=Payment success is status = 5 and is_test=0 (canonical).
+  phrase="approved deposits" -> maps_to=filter.payment_success | strategy=direct | notes=Payment success is status = 5 and is_test=0 (canonical).
+  phrase="approved deposit" -> maps_to=filter.payment_success | strategy=direct | notes=Payment success is status = 5 and is_test=0 (canonical).
+  phrase="successful withdrawals" -> maps_to=filter.payment_success | strategy=direct | notes=Payment success is status = 5 and is_test=0 (canonical).
+  phrase="successful withdrawal" -> maps_to=filter.payment_success | strategy=direct | notes=Payment success is status = 5 and is_test=0 (canonical).
+  phrase="approved withdrawals" -> maps_to=filter.payment_success | strategy=direct | notes=Payment success is status = 5 and is_test=0 (canonical).
+  phrase="approved withdrawal" -> maps_to=filter.payment_success | strategy=direct | notes=Payment success is status = 5 and is_test=0 (canonical).
+  phrase="paid withdrawals" -> maps_to=filter.payment_success | strategy=direct | notes=Payment success is status = 5 and is_test=0 (canonical).
+  phrase="paid withdrawal" -> maps_to=filter.payment_success | strategy=direct | notes=Payment success is status = 5 and is_test=0 (canonical).
+  phrase="ngr" -> maps_to=metric.ngr | strategy=direct | notes=CEO-locked definition.
+  phrase="FTD" -> maps_to=metric.ftd_list | strategy=direct | default_id=ftd_list | notes=Locked rule: 'FTD' is synonymous with 'FTD List' and always returns the row-level first-time depositor list (type='deposit', status = 5, is_test=0, action_count=1).
+  phrase="first time deposit" -> maps_to=metric.ftd_count,metric.ftd_amount | strategy=ask_user | clarification="Do you mean FTD Count or FTD Amount?" | notes=FTD uses action_count=1 on successful deposits.
+  phrase="first-time deposit" -> maps_to=metric.ftd_count,metric.ftd_amount | strategy=ask_user | clarification="Do you mean FTD Count or FTD Amount?" | notes=FTD uses action_count=1 on successful deposits.
+  phrase="first depositors" -> maps_to=metric.ftd_list | strategy=direct | default_id=ftd_list | notes=Synonym of FTD List.
+  phrase="ftd list" -> maps_to=metric.ftd_list | strategy=direct | default_id=ftd_list | notes=Returns row-level list of first-time depositors (action_count=1) with player identity.
+  phrase="list of ftd" -> maps_to=metric.ftd_list | strategy=direct | default_id=ftd_list | notes=Returns row-level list of first-time depositors (action_count=1) with player identity.
+  phrase="count of FTD" -> maps_to=metric.ftd_count | strategy=direct | default_id=ftd_count | notes=Synonym of FTD count.
+  phrase="number of FTD" -> maps_to=metric.ftd_count | strategy=direct | default_id=ftd_count | notes=Synonym of FTD count.
+  phrase="ftd volume" -> maps_to=metric.ftd_amount | strategy=direct | default_id=ftd_amount | notes=Synonym of FTD amount.
+  phrase="amount of FTD" -> maps_to=metric.ftd_amount | strategy=direct | default_id=ftd_amount | notes=Synonym of FTD amount.
+  phrase="FTDs" -> maps_to=metric.ftd_list | strategy=direct | default_id=ftd_list | notes=Locked rule: 'FTD' is synonymous with 'FTD List' and always returns the row-level first-time depositor list (type='deposit', status = 5, is_test=0, action_count=1).
+  phrase="First Time Depositor" -> maps_to=metric.ftd_list | strategy=direct | default_id=ftd_list | notes=Locked rule: 'FTD' is synonymous with 'FTD List' and always returns the row-level first-time depositor list (type='deposit', status = 5, is_test=0, action_count=1).
+  phrase="First-Time Depositor" -> maps_to=metric.ftd_list | strategy=direct | default_id=ftd_list | notes=Locked rule: 'FTD' is synonymous with 'FTD List' and always returns the row-level first-time depositor list (type='deposit', status = 5, is_test=0, action_count=1).
+  phrase="top players" -> maps_to=metric.bets_amount | strategy=direct | default_id=bets_amount | notes=Default 'top players' meaning: rank players by Bet Amount (stakes). Generate per-player aggregation (GROUP BY client_id, username), ORDER BY bets_amount DESC, and apply LIMIT (default 20 if not specified).
+  phrase="top player" -> maps_to=metric.bets_amount | strategy=direct | default_id=bets_amount | notes=Default 'top players' meaning: rank players by Bet Amount (stakes). Generate per-player aggregation (GROUP BY client_id, username), ORDER BY bets_amount DESC, and apply LIMIT (default 20 if not specified).
+  phrase="top gamblers" -> maps_to=metric.bets_amount | strategy=direct | default_id=bets_amount | notes=Default 'top players' meaning: rank players by Bet Amount (stakes). Generate per-player aggregation (GROUP BY client_id, username), ORDER BY bets_amount DESC, and apply LIMIT (default 20 if not specified).
+
+## COLUMNS (key tables)
+[table=mt_transaction_main]
+  after_balance: amount NULLABLE
+  amount: amount
+  base_amount: amount NULLABLE
+  before_balance: amount NULLABLE
+  bet_type: string allowed_values=[free text]
+  btag: string NULLABLE
+  client_bonus_id: id NULLABLE
+  client_id: identifier
+  created_at: date
+  created_at_dt: datetime
+  created_at_ts: string
+  currency_id: id
+  debit_id: id NULLABLE
+  game_id: id NULLABLE
+  id: id
+  internal_site_game_id: id NULLABLE
+  is_bonus: flag allowed_values=[0/1]
+  is_free_round: flag allowed_values=[0/1]
+  is_rollback: flag allowed_values=[0/1]
+  is_test: flag allowed_values=[0/1]
+  meta: metadata NULLABLE EXCLUDE_FROM_FILTERS
+  microtime: string EXCLUDE_FROM_FILTERS
+  product_id: id NULLABLE
+  rates: metadata NULLABLE EXCLUDE_FROM_FILTERS
+  round_id: id NULLABLE
+  site_id: id
+  sub_vendor_id: id NULLABLE
+  table_id: id
+  type: category allowed_values=[bet, win (exclude ''=0)]
+  vendor_id: id
+[table=mt_payment_archive]
+  action_count: string NULLABLE
+  after_balance: amount NULLABLE
+  amount: amount
+  base_amount: amount NULLABLE
+  before_balance: amount NULLABLE
+  bind: flag allowed_values=[0/1]
+  btag: string NULLABLE
+  cashback_id: id NULLABLE
+  client_account_id: id
+  client_account_type: string
+  client_bonus_id: id NULLABLE
+  client_id: identifier
+  created_at: date
+  created_at_dt: datetime
+  created_at_ts: string
+  currency_code: category
+  currency_id: id
+  external_transaction_id: id NULLABLE
+  id: id
+  info: metadata NULLABLE EXCLUDE_FROM_FILTERS
+  is_correction: flag allowed_values=[0/1]
+  is_land_based: flag allowed_values=[0/1]
+  is_test: flag allowed_values=[0/1]
+  meta: metadata NULLABLE EXCLUDE_FROM_FILTERS
+  microtime: string EXCLUDE_FROM_FILTERS
+  rates: metadata NULLABLE EXCLUDE_FROM_FILTERS
+  ref_transaction_id: id NULLABLE
+  settled_at: date NULLABLE
+  settled_at_dt: datetime NULLABLE
+  settled_at_ts: string NULLABLE
+  site_bonus_action_type: string NULLABLE
+  site_bonus_id: id NULLABLE
+  site_id: id
+  site_payment_id: id
+  site_payment_type: string allowed_values=[system, not_system]
+  status: category allowed_values=[1,2 treated as success for KPI formulas]
+  transaction_id: id
+  type: category allowed_values=[withdraw, deposit]
+  updated_at: date
+  updated_at_dt: datetime
+  updated_at_ts: string
+  withdraw_fee_amount: amount NULLABLE
+  withdraw_fee_percent: amount NULLABLE
+[table=m_client]
+  active: flag allowed_values=[0/1]
+  activity_level: string
+  client_info_id: id
+  created_at: date
+  currency_id: id
+  deleted_at: date
+  email_verified: string allowed_values=[0/1]
+  id: id
+  ip: pii_identifier EXCLUDE_FROM_FILTERS
+  is_locked: flag allowed_values=[0/1]
+  is_test: flag allowed_values=[0/1]
+  last_visit: string
+  locked: string
+  meta: metadata EXCLUDE_FROM_FILTERS
+  phone_verified: string allowed_values=[0/1]
+  site_id: id
+  status: category
+  username: username
+  verified: string allowed_values=[0/1]
+[table=site_game]
+  bonus_percent_id: id
+  cols: string
+  comment: string
+  created_at: datetime
+  deleted_at: datetime
+  exported: flag allowed_values=[0/1]
+  external_game_id: id
+  free_round_id: id
+  game_group_id: id
+  game_id: id
+  hide: string allowed_values=[0/1]
+  id: id
+  img: string
+  img_thumb: string
+  internal_game_id: id
+  is_active: flag allowed_values=[0/1]
+  is_bonus_supported: flag allowed_values=[0/1]
+  is_demo_supported: flag allowed_values=[0/1]
+  is_enabled: flag allowed_values=[0/1]
+  is_free_round_supported: flag allowed_values=[0/1]
+  is_main: flag allowed_values=[0/1]
+  is_mobile: flag allowed_values=[0/1]
+  keywords: string
+  last_updated_by_cms_user_id: id
+  last_updated_date: date
+  mobile_thumb: string
+  open_type: string
+  order: string
+  product_id: id
+  ratio: string
+  rows: string
+  site_id: id
+  sub_vendor_id: id
+  table_id: id
+  title: string
+  updated_at: datetime
+  vendor_id: id
+  vertical_thumb: string
+  view_type: category
+  wager_percent: string
+[table=currency]
+  code: category
+  deleted_at: date
+  id: id
+  value: amount
+[table=sub_vendor]
+  code: category
+  created_at: datetime
+  hide_from_main_grid: string allowed_values=[0/1]
+  id: id
+  image: string
+  interface: string
+  is_active: flag allowed_values=[0/1]
+  logo_icon: string
+  name: string
+  order: string
+  site_id: id
+  title: string
+  updated_at: datetime
+  vendor_id: id
+  vendor_segment_id: id
+  window_type: string
+[table=site_payment]
+  background_image: string
+  created_at: datetime
+  deposit_info: string
+  deposit_verified: string allowed_values=[0/1]
+  id: id
+  information_notice: string
+  is_active: flag allowed_values=[0/1]
+  is_active_deposit: flag allowed_values=[0/1]
+  is_active_payout: flag allowed_values=[0/1]
+  is_cancelable: flag allowed_values=[0/1]
+  is_country_detached: flag allowed_values=[0/1]
+  is_crypto: flag allowed_values=[0/1]
+  is_dashboard_deposit: flag allowed_values=[0/1]
+  is_dashboard_withdraw: flag allowed_values=[0/1]
+  is_main_config: flag allowed_values=[0/1]
+  is_online_deposit: flag allowed_values=[0/1]
+  is_online_payout: flag allowed_values=[0/1]
+  is_single_payout: flag allowed_values=[0/1]
+  is_visible: flag allowed_values=[0/1]
+  name: string
+  order: string
+  payment_id: id
+  payout_fee_percent: amount
+  payout_info: string
+  payout_verified: string allowed_values=[0/1]
+  rollover_factor: string
+  settings: metadata EXCLUDE_FROM_FILTERS
+  show_notice: string allowed_values=[0/1]
+  site_id: id
+  slug: string
+  updated_at: datetime
+  visible_in_control: string
+
+## PLAYER_IDENTITY
+  canonical_player_id_fact=<FACT>.client_id
+  canonical_client_pk=m_client.id
+  canonical_username=m_client.username
+  canonical_client_table=m_client
+  canonical_join=<FACT>.client_id = m_client.id AND <FACT>.site_id = m_client.site_id
+  join_type=LEFT
+  enforcement=hard
+  applies_when=player_level
+  player_id_aliases=player_id, player id, playerID, player_ids, player ids
+  canonical_player_id_output_field=client_id
+  canonical_player_id_label=Player ID
+  fallback_allowed=FAlSE
+  canonical_player_id_output_expression=toString(<FACT>.client_id) AS client_id
+  canonical_username_output_expression=m_client.username AS username
+  no_identifier_aggregation_rule=Never aggregate player identifiers; client_id and username must be returned at row-level or grouped by client_id explicitly.`

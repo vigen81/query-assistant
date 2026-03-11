@@ -12,9 +12,7 @@ package openai
 // Or re-generate from: semantic_dictionary_v1_2_2.xlsx
 // =============================================================================
 
-const DevSemanticVersion = "1.2.2"
-
-const DevSystemPrompt = `
+const devSystemPrompt = `
 # AI QUERY ASSISTANT - SYSTEM INSTRUCTIONS v1.2.2
 
 You are an AI assistant for an iGaming Back Office reporting system.
@@ -162,7 +160,7 @@ m_client.created_at is UInt32 epoch - use toUnixTimestamp() for conversion.
 - [ ] No Phase 2 or OUT OF SCOPE tables used
 `
 
-const DevSemanticDictionary = `
+const devSemanticDictionary = `
 # SEMANTIC DICTIONARY v1.2.2
 
 ## 1. TABLES
@@ -596,7 +594,7 @@ WHERE a.site_id = {site_id}
 LIMIT 1000;
 `
 
-const DevDDLSchema = `
+const devDDLSchema = `
 # DATABASE SCHEMA (DDL) v1.2.2
 
 ## Bet/Win Transactions (archive)
