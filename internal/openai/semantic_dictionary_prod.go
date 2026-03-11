@@ -148,9 +148,12 @@ Do NOT modify it.
 Leaderboard Behavior
 If user says "top players" / "top player" and no metric is specified:
 Default metric_id = bets_amount.
-Generate per-player aggregation:
-GROUP BY client_id, username
-ORDER BY metric DESC
+Generate per-player aggregation using the aggregate-first subquery pattern:
+  Inner subquery: GROUP BY client_id ONLY on the fact table, apply ORDER BY metric DESC and LIMIT N.
+  Outer query: LEFT JOIN m_client on the subquery result for username enrichment.
+  Apply the final ORDER BY metric DESC in the outer query.
+Never GROUP BY username directly on a fact table.
+Never join m_client before aggregation in leaderboard or top-N queries.
 LIMIT 20 (unless specified otherwise)
 Multi-Metric Requests
 If user explicitly requests multiple metrics:
@@ -180,6 +183,28 @@ Never return numeric client_id.
 If canonical join cannot be formed using dictionary joins:
 Return only: toString(fact.client_id) AS client_id
 Do NOT invent joins.
+
+Aggregate-first join pattern (MANDATORY for leaderboard/top-N queries):
+Never join m_client before aggregation on a fact table.
+Always aggregate the fact table first in a subquery, then join m_client in the outer query.
+Canonical structure:
+  SELECT toString(agg.client_id) AS client_id,
+         m_client.username AS username,
+         agg.<metric>
+  FROM (
+      SELECT client_id,
+             <metric_formula> AS <metric>
+      FROM <fact_table>
+      WHERE site_id = {site_id}
+        AND <other filters>
+      GROUP BY client_id
+      ORDER BY <metric> DESC
+      LIMIT <n>
+  ) AS agg
+  LEFT JOIN m_client ON agg.client_id = m_client.id
+                     AND m_client.site_id = {site_id}
+  ORDER BY <metric> DESC
+This pattern applies whenever the query has GROUP BY client_id and a JOIN to m_client.
 
 10) PII & RBAC
 Do NOT implement masking or RBAC logic in SQL.
@@ -1477,9 +1502,9 @@ WHERE p.type = 'deposit' AND p.status = 5 AND p.is_test = 0 AND p.action_count =
   phrase="FTDs" -> maps_to=metric.ftd_list | strategy=direct | default_id=ftd_list | notes=Locked rule: 'FTD' is synonymous with 'FTD List' and always returns the row-level first-time depositor list (type='deposit', status = 5, is_test=0, action_count=1).
   phrase="First Time Depositor" -> maps_to=metric.ftd_list | strategy=direct | default_id=ftd_list | notes=Locked rule: 'FTD' is synonymous with 'FTD List' and always returns the row-level first-time depositor list (type='deposit', status = 5, is_test=0, action_count=1).
   phrase="First-Time Depositor" -> maps_to=metric.ftd_list | strategy=direct | default_id=ftd_list | notes=Locked rule: 'FTD' is synonymous with 'FTD List' and always returns the row-level first-time depositor list (type='deposit', status = 5, is_test=0, action_count=1).
-  phrase="top players" -> maps_to=metric.bets_amount | strategy=direct | default_id=bets_amount | notes=Default 'top players' meaning: rank players by Bet Amount (stakes). Generate per-player aggregation (GROUP BY client_id, username), ORDER BY bets_amount DESC, and apply LIMIT (default 20 if not specified).
-  phrase="top player" -> maps_to=metric.bets_amount | strategy=direct | default_id=bets_amount | notes=Default 'top players' meaning: rank players by Bet Amount (stakes). Generate per-player aggregation (GROUP BY client_id, username), ORDER BY bets_amount DESC, and apply LIMIT (default 20 if not specified).
-  phrase="top gamblers" -> maps_to=metric.bets_amount | strategy=direct | default_id=bets_amount | notes=Default 'top players' meaning: rank players by Bet Amount (stakes). Generate per-player aggregation (GROUP BY client_id, username), ORDER BY bets_amount DESC, and apply LIMIT (default 20 if not specified).
+  phrase="top players" -> maps_to=metric.bets_amount | strategy=direct | default_id=bets_amount | notes=Default 'top players' meaning: rank players by Bet Amount (stakes). Use aggregate-first subquery pattern: GROUP BY client_id ONLY inside subquery with LIMIT N, then join m_client for username in outer query. ORDER BY bets_amount DESC. Default LIMIT 20 if not specified.
+  phrase="top player" -> maps_to=metric.bets_amount | strategy=direct | default_id=bets_amount | notes=Default 'top players' meaning: rank players by Bet Amount (stakes). Use aggregate-first subquery pattern: GROUP BY client_id ONLY inside subquery with LIMIT N, then join m_client for username in outer query. ORDER BY bets_amount DESC. Default LIMIT 20 if not specified.
+  phrase="top gamblers" -> maps_to=metric.bets_amount | strategy=direct | default_id=bets_amount | notes=Default 'top players' meaning: rank players by Bet Amount (stakes). Use aggregate-first subquery pattern: GROUP BY client_id ONLY inside subquery with LIMIT N, then join m_client for username in outer query. ORDER BY bets_amount DESC. Default LIMIT 20 if not specified.
 
 ## COLUMNS (key tables)
 [table=mt_transaction_main]

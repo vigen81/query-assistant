@@ -6,11 +6,11 @@ import "os"
 // Public API for semantic dictionary and system prompt.
 // Routes to prod or dev constants based on POD_ENV.
 //
-// Prod  → system prompt v1.1.0  |  semantic dictionary v1.1.3
+// Prod  → system prompt v1.1.0  |  semantic dictionary v1.1.4
 // Dev   → system prompt v1.2.x  |  semantic dictionary v1.2.2
 
 const (
-	prodSemanticVersion = "v1.1.3"
+	prodSemanticVersion = "v1.1.4"
 	devSemanticVersion  = "v1.2.2"
 )
 
