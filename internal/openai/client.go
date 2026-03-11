@@ -64,10 +64,10 @@ func (c *Client) GenerateQuery(ctx context.Context, prompt string, siteID int64)
 	resp, err := c.client.CreateChatCompletion(
 		ctx,
 		openai.ChatCompletionRequest{
-			Model:       model,
-			Messages:    messages,
-			MaxTokens:   c.config.OpenAI.MaxTokens,
-			Temperature: c.config.OpenAI.Temperature,
+			Model:               model,
+			Messages:            messages,
+			MaxCompletionTokens: c.config.OpenAI.MaxTokens,
+			Temperature:         c.config.OpenAI.Temperature,
 		},
 	)
 
