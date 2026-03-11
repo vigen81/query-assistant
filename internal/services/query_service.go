@@ -83,6 +83,8 @@ func (s *QueryService) ProcessQuery(ctx context.Context, req *models.QueryReques
 	// Clean up the generated SQL
 	generatedSQL = s.cleanGeneratedSQL(generatedSQL)
 
+	generatedSQL = openai.NormalizePartitionFilter(generatedSQL)
+
 	s.logger.WithFields(logrus.Fields{
 		"query_id":      queryID,
 		"generated_sql": generatedSQL,
