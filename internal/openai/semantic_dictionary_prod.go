@@ -1,19 +1,22 @@
 package openai
 
 // semantic_dictionary_prod.go
-// System Prompt       : v1.5.3
-// Semantic Dictionary : v1.5.3 (enterprise)
+// System Prompt       : v1.5.4
+// Semantic Dictionary : v1.5.4 (enterprise)
 // Environment         : prod (POD_ENV=prod)
 //
-// Changes from v1.5.2:
-//   - New metric: bets_amount_total — total bets including bonus (no is_bonus filter)
-//   - "total bets including bonus" / "total bets" / "all bets" → direct → bets_amount_total
-//     (was incorrectly set to ask_user — intent is unambiguous)
-//   - DEFAULT AMOUNT RULE updated: "total bets" → bets_amount_total (no clarification)
+// Changes from v1.5.3:
+//   - FINAL rule: FINAL must appear BEFORE alias: table AS alias FINAL → WRONG
+//     Correct pattern: FROM client_bonus AS cb FINAL / LEFT JOIN site_game FINAL AS sg
+//     Note: ClickHouse accepts both "table FINAL AS alias" and "table AS alias FINAL"
+//     but the system prompt now shows both forms to prevent confusion
+//   - claimed_bonus_and_withdrew formula: fixed FINAL placement + base_amount
+//   - active_bonus_players_list formula: fixed FINAL placement
+//   - ftd_list formula: updated to use COALESCE(base_amount, amount)
 //
 // ⚠ DO NOT EDIT MANUALLY — generated from:
-//   system_prompt_live_ai_reporting_v1_5_3
-//   live_dictionary_enterprise_v1_5_3.xlsx
+//   system_prompt_live_ai_reporting_v1_5_4
+//   live_dictionary_enterprise_v1_5_4.xlsx
 
 const prodSystemPrompt = `You are an AI SQL generation engine for an enterprise iGaming Back Office reporting system.
 Your ONLY responsibility is to output EITHER:
@@ -196,10 +199,15 @@ For standalone table references (non-fact tables used in JOINs): add _peerdb_is_
 9) SHARED REPLACING MERGE TREE — FINAL RULE (MANDATORY)
 The following tables use SharedReplacingMergeTree engine and may contain duplicate rows during background merge:
 site_game, currency, sub_vendor, site_payment, exchange, client_bonus, client_tag_client, client_tags, site, site_bonus, site_vendor, products, game, vendor, payment
-When querying or joining ANY of these tables, ALWAYS append FINAL to the table reference:
+When querying or joining ANY of these tables, ALWAYS append FINAL immediately after the table name, BEFORE the alias:
   FROM site_game FINAL
+  FROM site_game FINAL AS sg
   LEFT JOIN currency FINAL ON ...
+  LEFT JOIN site_game FINAL AS sg ON ...
   FROM client_bonus FINAL AS cb
+NEVER place FINAL after the alias — FINAL must come before AS:
+  CORRECT: LEFT JOIN site_game FINAL AS sg ON ...
+  WRONG:   LEFT JOIN site_game AS sg FINAL ON ...
 MySQL engine tables (m_* prefix) do NOT need FINAL.
 Fact tables mt_transaction_main and mt_payment_archive do NOT need FINAL (SharedMergeTree).
 
@@ -1001,7 +1009,7 @@ const prodSemanticDictionary = `## TABLES
   name=FTD List
   description=List of first-time depositors (first successful deposit per player).
   fact_table=mt_payment_archive
-  formula_clickhouse=SELECT toString(p.client_id) AS client_id, mc.username AS username, p.created_at_dt AS first_deposit_date, p.amount AS first_deposit_amount FROM mt_payment_archive AS p LEFT JOIN m_client AS mc ON p.client_id = mc.id AND p.site_id = mc.site_id WHERE p.type = 'deposit' AND p.status = 5 AND p.is_test = 0 AND p.action_count = 1 AND p._peerdb_is_deleted = 0
+  formula_clickhouse=SELECT toString(p.client_id) AS client_id, mc.username AS username, p.created_at_dt AS first_deposit_date, COALESCE(p.base_amount, p.amount) AS first_deposit_amount FROM mt_payment_archive AS p LEFT JOIN m_client AS mc ON p.client_id = mc.id AND p.site_id = mc.site_id WHERE p.type = 'deposit' AND p.status = 5 AND p.is_test = 0 AND p.action_count = 1 AND p._peerdb_is_deleted = 0
   type=list
   grain_level=player_level
   default_filter_behavior=Default filters apply: enforce site_id, exclude is_test=1, success statuses for payments.
@@ -1034,8 +1042,7 @@ const prodSemanticDictionary = `## TABLES
   name=Claimed Bonus and Withdrew Players
   description=List of players who claimed a bonus AND made a successful withdrawal on the same date.
   fact_table=client_bonus
-  formula_clickhouse=SELECT toString(cb.client_id) AS client_id, mc.username AS username, toDate(toDateTime(cb.created_at)) AS bonus_claimed_date, cb.initial_amount AS bonus_amount, sumIf(p.amount, p.type = 'withdraw' AND p.status = 5 AND p.is_test = 0 AND p._peerdb_is_deleted = 0) AS withdrawal_amount FROM client_bonus FINAL AS cb INNER JOIN mt_payment_archive AS p ON cb.client_id = p.client_id AND p.site_id = {site_id} LEFT JOIN m_client AS mc ON cb.client_id = mc.id AND mc.site_id = {site_id} WHERE toDate(toDateTime(cb.created_at)) = {date_filter} AND cb._peerdb_is_deleted = 0 AND p.type = 'withdraw' AND p.status = 5 AND p.is_test = 0 AND toDate(p.created_at) = {date_filter} GROUP BY cb.client_id, mc.username, cb.created_at, cb.initial_amount HAVING withdrawal_amount > 0 ORDER BY withdrawal_amount DESC
-LIMIT {limit}
+  formula_clickhouse=SELECT toString(cb.client_id) AS client_id, mc.username AS username, toDate(toDateTime(cb.created_at)) AS bonus_claimed_date, cb.initial_amount AS bonus_amount, sumIf(COALESCE(p.base_amount, p.amount), p.type = 'withdraw' AND p.status = 5 AND p.is_test = 0 AND p._peerdb_is_deleted = 0) AS withdrawal_amount FROM client_bonus AS cb FINAL INNER JOIN mt_payment_archive AS p ON cb.client_id = p.client_id AND p.site_id = {site_id} LEFT JOIN m_client AS mc ON cb.client_id = mc.id AND mc.site_id = {site_id} WHERE toDate(toDateTime(cb.created_at)) = {date_filter} AND cb._peerdb_is_deleted = 0 AND p.type = 'withdraw' AND p.status = 5 AND p.is_test = 0 AND toDate(p.created_at) = {date_filter} GROUP BY cb.client_id, mc.username, cb.created_at, cb.initial_amount HAVING withdrawal_amount > 0 ORDER BY withdrawal_amount DESC LIMIT {limit}
   type=list
   grain_level=player_level
   default_filter_behavior=Enforce site_id via mt_payment_archive and m_client joins. client_bonus has no site_id.
@@ -1046,7 +1053,7 @@ LIMIT {limit}
   name=Active Bonus Players List
   description=Row-level list of players who currently have an active bonus (is_active=1 AND status=active) on the specified date.
   fact_table=client_bonus
-  formula_clickhouse=SELECT toString(cb.client_id) AS client_id, mc.username AS username, toDate(toDateTime(cb.created_at)) AS bonus_claimed_date, cb.initial_amount AS bonus_amount, cb.status AS bonus_status FROM client_bonus FINAL AS cb LEFT JOIN m_client AS mc ON cb.client_id = mc.id AND mc.site_id = {site_id} WHERE cb.is_active = 1 AND cb.status = 'active' AND cb._peerdb_is_deleted = 0 AND toDate(toDateTime(cb.created_at)) = {date_filter} ORDER BY cb.initial_amount DESC LIMIT {limit}
+  formula_clickhouse=SELECT toString(cb.client_id) AS client_id, mc.username AS username, toDate(toDateTime(cb.created_at)) AS bonus_claimed_date, cb.initial_amount AS bonus_amount, cb.status AS bonus_status FROM client_bonus AS cb FINAL LEFT JOIN m_client AS mc ON cb.client_id = mc.id AND mc.site_id = {site_id} WHERE cb.is_active = 1 AND cb.status = 'active' AND cb._peerdb_is_deleted = 0 AND toDate(toDateTime(cb.created_at)) = {date_filter} ORDER BY cb.initial_amount DESC LIMIT {limit}
   type=list
   grain_level=player_level,date
   default_filter_behavior=is_active=1 AND status=active AND _peerdb_is_deleted=0
