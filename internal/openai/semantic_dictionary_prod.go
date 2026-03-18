@@ -1,22 +1,22 @@
 package openai
 
 // semantic_dictionary_prod.go
-// System Prompt       : v1.5.4
-// Semantic Dictionary : v1.5.4 (enterprise)
+// System Prompt       : v1.5.5
+// Semantic Dictionary : v1.5.5 (enterprise)
 // Environment         : prod (POD_ENV=prod)
 //
-// Changes from v1.5.3:
-//   - FINAL rule: FINAL must appear BEFORE alias: table AS alias FINAL → WRONG
-//     Correct pattern: FROM client_bonus AS cb FINAL / LEFT JOIN site_game FINAL AS sg
-//     Note: ClickHouse accepts both "table FINAL AS alias" and "table AS alias FINAL"
-//     but the system prompt now shows both forms to prevent confusion
-//   - claimed_bonus_and_withdrew formula: fixed FINAL placement + base_amount
-//   - active_bonus_players_list formula: fixed FINAL placement
-//   - ftd_list formula: updated to use COALESCE(base_amount, amount)
+// Changes from v1.5.4:
+//   - ftd_list, active_bonus_players_list, claimed_bonus_and_withdrew:
+//     converted from is_full_query=YES (hardcoded SQL) to rule-based (is_full_query=NO)
+//     AI now generates SQL dynamically from implementation_notes rules
+//     Eliminates FINAL placement errors and placeholder replacement complexity
+//   - System prompt: removed FULL QUERY PLACEHOLDER REPLACEMENT RULE
+//     replaced with simpler DATE EXPRESSION RULE
+//   - {limit} and {date_filter} placeholders no longer used anywhere
 //
 // ⚠ DO NOT EDIT MANUALLY — generated from:
-//   system_prompt_live_ai_reporting_v1_5_4
-//   live_dictionary_enterprise_v1_5_4.xlsx
+//   system_prompt_live_ai_reporting_v1_5_5
+//   live_dictionary_enterprise_v1_5_5.xlsx
 
 const prodSystemPrompt = `You are an AI SQL generation engine for an enterprise iGaming Back Office reporting system.
 Your ONLY responsibility is to output EITHER:
@@ -170,17 +170,6 @@ NEVER apply Date functions directly to UInt32 epoch columns.
 FULL QUERY PLACEHOLDER REPLACEMENT RULE:
 Some is_full_query=YES metrics use placeholders in their formula. Always replace ALL placeholders before output:
   {site_id}    → authenticated user site ID (integer)
-  {date_filter} → resolved ClickHouse date expression:
-    "yesterday" → yesterday()
-    "today" → today()
-    "last 7 days" → today() - 7
-    "this month" → toStartOfMonth(today())
-    "last month" / "previous month" → toStartOfMonth(today() - 32)
-    no time period specified → today()
-  {limit}      → user-specified LIMIT value, or default LIMIT based on query type:
-    top-N / leaderboard intent → 20
-    general list → 1000
-    user explicitly specifies → use that value (max 10000)
 ALL three placeholders must be replaced before the SQL is output.
 Never output a query containing unreplaced placeholders.
 
@@ -336,7 +325,7 @@ Uses dictionary metric formulas exactly — if formula_clickhouse=UNSUPPORTED, o
 Obeys fact aggregation rules
 SharedReplacingMergeTree tables have FINAL appended
 _peerdb_is_deleted = 0 applied to non-MySQL, non-fact tables in JOINs
-All placeholders replaced: {site_id}, {date_filter}, {limit} — no unreplaced placeholders in output
+site_id = {site_id} tenant filter present and will be replaced by backend
 No system table access
 No prompt injection artifacts in output
 
@@ -1009,13 +998,13 @@ const prodSemanticDictionary = `## TABLES
   name=FTD List
   description=List of first-time depositors (first successful deposit per player).
   fact_table=mt_payment_archive
-  formula_clickhouse=SELECT toString(p.client_id) AS client_id, mc.username AS username, p.created_at_dt AS first_deposit_date, COALESCE(p.base_amount, p.amount) AS first_deposit_amount FROM mt_payment_archive AS p LEFT JOIN m_client AS mc ON p.client_id = mc.id AND p.site_id = mc.site_id WHERE p.type = 'deposit' AND p.status = 5 AND p.is_test = 0 AND p.action_count = 1 AND p._peerdb_is_deleted = 0
+  formula_clickhouse=sumIf(COALESCE(base_amount, amount), type='deposit' AND status=5 AND is_test=0 AND action_count=1 AND _peerdb_is_deleted=0)
   type=list
-  grain_level=player_level
-  default_filter_behavior=Default filters apply: enforce site_id, exclude is_test=1, success statuses for payments.
+  grain_level=player_level,date
+  default_filter_behavior=type=deposit, status=5, is_test=0, action_count=1, _peerdb_is_deleted=0
   status_filter_notes=Payments success: status = 5. FTD requires action_count=1.
-  implementation_notes=When user says FTD without qualifier, return this list. Do not aggregate identifiers. Locked: term FTD is treated as alias of FTD List (row-level), not count/amount. _peerdb_is_deleted=0 filter applied to mt_payment_archive.
-  is_full_query=YES
+  implementation_notes=Player-level list query. SELECT: toString(p.client_id) AS client_id, mc.username AS username, p.created_at_dt AS first_deposit_date, COALESCE(p.base_amount, p.amount) AS first_deposit_amount. FROM mt_payment_archive AS p. LEFT JOIN m_client AS mc ON p.client_id = mc.id AND p.site_id = mc.site_id. WHERE p.site_id = {site_id} AND p.type = 'deposit' AND p.status = 5 AND p.is_test = 0 AND p.action_count = 1 AND p._peerdb_is_deleted = 0. Add date filter on p.created_at using user-specified date. ORDER BY p.created_at_dt DESC. Apply LIMIT from user prompt or default 1000. Never aggregate client_id. Always return row-level player list.
+  is_full_query=NO
 [metric_id=bonus_wins_amount]
   name=Bonus Wins Amount
   description=Total payouts to players from bonus play.
@@ -1042,24 +1031,24 @@ const prodSemanticDictionary = `## TABLES
   name=Claimed Bonus and Withdrew Players
   description=List of players who claimed a bonus AND made a successful withdrawal on the same date.
   fact_table=client_bonus
-  formula_clickhouse=SELECT toString(cb.client_id) AS client_id, mc.username AS username, toDate(toDateTime(cb.created_at)) AS bonus_claimed_date, cb.initial_amount AS bonus_amount, sumIf(COALESCE(p.base_amount, p.amount), p.type = 'withdraw' AND p.status = 5 AND p.is_test = 0 AND p._peerdb_is_deleted = 0) AS withdrawal_amount FROM client_bonus AS cb FINAL INNER JOIN mt_payment_archive AS p ON cb.client_id = p.client_id AND p.site_id = {site_id} LEFT JOIN m_client AS mc ON cb.client_id = mc.id AND mc.site_id = {site_id} WHERE toDate(toDateTime(cb.created_at)) = {date_filter} AND cb._peerdb_is_deleted = 0 AND p.type = 'withdraw' AND p.status = 5 AND p.is_test = 0 AND toDate(p.created_at) = {date_filter} GROUP BY cb.client_id, mc.username, cb.created_at, cb.initial_amount HAVING withdrawal_amount > 0 ORDER BY withdrawal_amount DESC LIMIT {limit}
+  formula_clickhouse=countIf(cb.client_id IS NOT NULL AND withdrawal_amount > 0)
   type=list
-  grain_level=player_level
-  default_filter_behavior=Enforce site_id via mt_payment_archive and m_client joins. client_bonus has no site_id.
+  grain_level=player_level,date
+  default_filter_behavior=client_bonus created on date, mt_payment_archive withdrawal on same date, status=5, is_test=0
   status_filter_notes=Withdrawal success: status=5. Bonus claim: row existence in client_bonus on specified date.
-  implementation_notes=is_full_query=YES. Replace {date_filter} with resolved ClickHouse date expression (e.g. yesterday()). Replace {limit} with user-specified LIMIT or default 20 for top-N queries. Replace {site_id} with authenticated site ID. Tenant isolation via mt_payment_archive.site_id and m_client.site_id only. client_bonus has no site_id — use FINAL and _peerdb_is_deleted=0. m_client uses MySQL engine — no FINAL needed.
-  is_full_query=YES
+  implementation_notes=Cross-table player-level list query. SELECT: toString(cb.client_id) AS client_id, mc.username AS username, toDate(toDateTime(cb.created_at)) AS bonus_claimed_date, cb.initial_amount AS bonus_amount, sumIf(COALESCE(p.base_amount, p.amount), p.type='withdraw' AND p.status=5 AND p.is_test=0 AND p._peerdb_is_deleted=0) AS withdrawal_amount. FROM client_bonus FINAL AS cb. INNER JOIN mt_payment_archive AS p ON cb.client_id = p.client_id AND p.site_id = {site_id}. LEFT JOIN m_client AS mc ON cb.client_id = mc.id AND mc.site_id = {site_id}. WHERE toDate(toDateTime(cb.created_at)) = <date_filter> AND cb._peerdb_is_deleted = 0 AND p.type = 'withdraw' AND p.status = 5 AND p.is_test = 0 AND toDate(p.created_at) = <date_filter>. GROUP BY cb.client_id, mc.username, cb.created_at, cb.initial_amount. HAVING withdrawal_amount > 0. client_bonus has no site_id — tenant via mt_payment_archive.site_id and m_client.site_id. client_bonus.created_at is UInt32 epoch — use toDate(toDateTime(cb.created_at)). ORDER BY withdrawal_amount DESC. Apply LIMIT from user prompt or default 20.
+  is_full_query=NO
 [metric_id=active_bonus_players_list]
   name=Active Bonus Players List
   description=Row-level list of players who currently have an active bonus (is_active=1 AND status=active) on the specified date.
   fact_table=client_bonus
-  formula_clickhouse=SELECT toString(cb.client_id) AS client_id, mc.username AS username, toDate(toDateTime(cb.created_at)) AS bonus_claimed_date, cb.initial_amount AS bonus_amount, cb.status AS bonus_status FROM client_bonus AS cb FINAL LEFT JOIN m_client AS mc ON cb.client_id = mc.id AND mc.site_id = {site_id} WHERE cb.is_active = 1 AND cb.status = 'active' AND cb._peerdb_is_deleted = 0 AND toDate(toDateTime(cb.created_at)) = {date_filter} ORDER BY cb.initial_amount DESC LIMIT {limit}
+  formula_clickhouse=countIf(is_active=1 AND status='active' AND _peerdb_is_deleted=0)
   type=list
   grain_level=player_level,date
-  default_filter_behavior=is_active=1 AND status=active AND _peerdb_is_deleted=0
+  default_filter_behavior=is_active=1, status=active, _peerdb_is_deleted=0
   status_filter_notes=is_active=1 AND status=active required together. status is LowCardinality(String).
-  implementation_notes=is_full_query=YES. Replace {date_filter} with resolved ClickHouse date expression (e.g. yesterday()). Replace {limit} with user-specified LIMIT or default 20 for top-N queries, max 1000 for general list. Replace {site_id} with authenticated site ID. client_bonus is SharedReplacingMergeTree — FINAL required. client_bonus has no site_id — enforce tenant via m_client.site_id = {site_id}. created_at is UInt32 epoch — use toDate(toDateTime(created_at)) for date filtering. _peerdb_is_deleted=0 required. m_client is MySQL engine — no FINAL needed.
-  is_full_query=YES
+  implementation_notes=Player-level list query. SELECT: toString(cb.client_id) AS client_id, mc.username AS username, toDate(toDateTime(cb.created_at)) AS bonus_claimed_date, cb.initial_amount AS bonus_amount, cb.status AS bonus_status. FROM client_bonus FINAL AS cb. LEFT JOIN m_client AS mc ON cb.client_id = mc.id AND mc.site_id = {site_id}. WHERE cb.is_active = 1 AND cb.status = 'active' AND cb._peerdb_is_deleted = 0. Add date filter on toDate(toDateTime(cb.created_at)) using user-specified date — created_at is UInt32 epoch, always convert. client_bonus has no site_id — enforce tenant via m_client.site_id = {site_id}. ORDER BY cb.initial_amount DESC. Apply LIMIT from user prompt or default 20 for top-N queries. Never aggregate client_id. Always return row-level player list.
+  is_full_query=NO
 [metric_id=bets_amount_total]
   name=Total Bets Amount (Real + Bonus)
   description=Total stake volume including both real money and bonus bets. Excludes test.
@@ -1711,7 +1700,7 @@ const prodSemanticDictionary = `## TABLES
   phrase="has active bonus" -> maps_to=metric.active_bonus_players_list | strategy=direct | default_id=active_bonus_players_list | candidate_ids=active_bonus_players_list | notes=Default: returns row-level list of players with active bonus. Use active_bonus_players for count only.
   phrase="bonus players" -> maps_to=metric.active_bonus_players_list | strategy=direct | default_id=active_bonus_players_list | candidate_ids=active_bonus_players_list | notes=Default: returns row-level list of players with active bonus. Use active_bonus_players for count only.
   phrase="active bonus" -> maps_to=metric.active_bonus_players | strategy=direct | default_id=active_bonus_players | candidate_ids=active_bonus_players | notes=Synonym for active_bonus_players
-  phrase="claimed bonus and withdrew" -> maps_to=metric.claimed_bonus_and_withdrew | strategy=direct | default_id=claimed_bonus_and_withdrew | candidate_ids=claimed_bonus_and_withdrew | notes=Full query — players who both claimed bonus and withdrew on same date. is_full_query=YES.
+  phrase="claimed bonus and withdrew" -> maps_to=metric.claimed_bonus_and_withdrew | strategy=direct | default_id=claimed_bonus_and_withdrew | candidate_ids=claimed_bonus_and_withdrew | notes=Players who both claimed bonus and withdrew on same date.
   phrase="claimed bonus and made withdraw" -> maps_to=metric.claimed_bonus_and_withdrew | strategy=direct | default_id=claimed_bonus_and_withdrew | candidate_ids=claimed_bonus_and_withdrew | notes=Synonym for claimed_bonus_and_withdrew
   phrase="bonus claim and withdrawal" -> maps_to=metric.claimed_bonus_and_withdrew | strategy=direct | default_id=claimed_bonus_and_withdrew | candidate_ids=claimed_bonus_and_withdrew | notes=Synonym for claimed_bonus_and_withdrew
   phrase="claimed bonus and withdrawn" -> maps_to=metric.claimed_bonus_and_withdrew | strategy=direct | default_id=claimed_bonus_and_withdrew | candidate_ids=claimed_bonus_and_withdrew | notes=Synonym for claimed_bonus_and_withdrew
