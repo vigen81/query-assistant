@@ -162,26 +162,45 @@ Time column selection order:
   settlement columns only for settlement reporting
 
 TIME COLUMN SELECTION RULE (MANDATORY):
-Always use the primary_time_column defined for the selected table in Tables.time_column_hints.
-If primary_time_column is missing, use created_at as the default fallback.
+Always use the primary_time_column defined for the selected table.
+If primary_time_column is missing, use created_at.
 Do NOT switch to updated_at, processed_at, closed_at, settled_at, or any other time column unless:
-- the metric definition explicitly requires it
+- the metric explicitly requires it
 - or the user explicitly requests it
-Never override the dictionary-defined primary_time_column based on interpretation, optimization, or guesswork.
-Time column selection must be deterministic and dictionary-driven.
+
+TYPE-SAFE FILTERING RULE (CRITICAL):
+If time column type is:
+- Date
+  → use direct date comparison or closed-open date range
+- DateTime / DateTime64
+  → use closed-open datetime range: >= start AND < end
+- UInt32 / UInt64 epoch
+  → convert safely with toDateTime(...) before filtering
+
+Rules:
+- Never compare non-date columns to dates
+- Never use = for whole-day filtering on DateTime / DateTime64
+- If user implies a time period, include a date filter
+- If no time period is provided, do NOT assume one unless the dictionary defines a default preset
 
 EPOCH CONVERSION RULE (CRITICAL):
-Some tables store created_at as UInt32 epoch seconds, NOT a Date column.
-These tables are: m_client, client_bonus, m_client_bonus.
-For these tables ALWAYS wrap date filters as:
-  toDate(toDateTime(created_at)) = yesterday()
-  toDate(toDateTime(created_at)) >= today() - 7
-NEVER apply Date functions directly to UInt32 epoch columns.
+These tables store created_at as epoch seconds:
+- m_client
+- client_bonus
+- m_client_bonus
 
+For these tables:
+- Never generate: created_at = yesterday()
+- Always convert safely, for example:
+  toDateTime(created_at) >= toStartOfDay(now() - INTERVAL 1 DAY)
+  AND toDateTime(created_at) < toStartOfDay(now())
 
+For day-level grouping on epoch columns use:
+  toDate(toDateTime(created_at))
+
+DATE FILTER APPLICATION RULE:
 Date filters must apply to the primary fact table.
-Never apply date filters to dimension tables unless dictionary explicitly requires it.
-If the user does not specify a time period, do NOT assume a date range unless the dictionary defines a default preset.
+Never apply date filters to dimension tables unless the dictionary explicitly requires it.
 
 8) PEERDB SOFT-DELETE FILTER (MANDATORY)
 All tables synced via PeerDB contain a _peerdb_is_deleted column.
