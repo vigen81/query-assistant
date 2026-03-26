@@ -1,5 +1,100 @@
 basePath: /api/v1
 definitions:
+  models.BannerGenerationAccepted:
+    properties:
+      created_at:
+        example: "2024-01-01T00:00:00Z"
+        type: string
+      generation_id:
+        example: 550e8400-e29b-41d4-a716-446655440000
+        type: string
+      status:
+        example: in_progress
+        type: string
+    type: object
+  models.BannerGenerationRequest:
+    properties:
+      inputs:
+        $ref: '#/definitions/models.BannerInputs'
+      language:
+        description: e.g. "en"
+        type: string
+      output:
+        $ref: '#/definitions/models.BannerOutputParams'
+    required:
+    - inputs
+    - language
+    - output
+    type: object
+  models.BannerGenerationResult:
+    properties:
+      created_at:
+        example: "2024-01-01T00:00:00Z"
+        type: string
+      failure_reason:
+        example: 'dall-e-3 generation failed: rate limit'
+        type: string
+      generation_id:
+        example: 550e8400-e29b-41d4-a716-446655440000
+        type: string
+      status:
+        example: completed
+        type: string
+      updated_at:
+        example: "2024-01-01T00:00:05Z"
+        type: string
+      variants:
+        items:
+          $ref: '#/definitions/models.BannerVariant'
+        type: array
+    type: object
+  models.BannerInputs:
+    properties:
+      creative_description:
+        example: Gold coins and dramatic lighting
+        type: string
+      cta_text:
+        example: Claim Now
+        type: string
+      headline:
+        example: Get 100% Bonus on First Deposit
+        type: string
+      secondary_text:
+        example: Up to $500 matched. T&Cs apply.
+        type: string
+      visual_style:
+        example: dark_luxury
+        type: string
+    type: object
+  models.BannerOutputParams:
+    properties:
+      format:
+        example: url
+        type: string
+      height:
+        example: 1024
+        type: integer
+      max_size_kb:
+        example: 2048
+        type: integer
+      width:
+        example: 1792
+        type: integer
+    type: object
+  models.BannerVariant:
+    properties:
+      b64_json:
+        type: string
+      index:
+        example: 0
+        type: integer
+      revised_prompt:
+        example: A high-quality promotional banner...
+        type: string
+      url:
+        example: https://oaidalleapiprodscus.blob.core.windows.net/...
+        type: string
+    type: object
   models.ColumnMetadata:
     properties:
       database_type:
@@ -396,6 +491,7 @@ info:
     - **Query Execution**: Automatically executes generated queries with timeout protection
     - **Secure**: Query validation, site_id enforcement, and execution limits
     - **Observable**: Structured logging with Graylog integration
+    - **Banner Generation**: Async AI-powered marketing banner image generation via DALL-E 3
 
     ## Important Business Rules
     - **GGR Calculation**: Gross Gaming Revenue is always calculated as Total Bet - Total Win
@@ -410,10 +506,88 @@ info:
     ## Authentication
     Most endpoints require a Bearer token in the Authorization header:
     Authorization: Bearer {your-jwt-token}
+
+    ## Banner Image Generation
+    Banner generation is asynchronous. POST to /api/v1/banner/generate to start a job,
+    then poll GET /api/v1/banner/generate/{id} until status is "completed" or "failed".
+    Default variant count is 4 images per request (configurable via banner.variant_count in config).
   termsOfService: http://swagger.io/terms/
   title: Query Assistant API
   version: "1.0"
 paths:
+  /banner/generate:
+    post:
+      consumes:
+      - application/json
+      description: Accepts a banner generation request and returns a generation ID
+        immediately.
+      parameters:
+      - description: Bearer token
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      - description: Generation parameters
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/models.BannerGenerationRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/models.BannerGenerationAccepted'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Start async banner image generation
+      tags:
+      - banner
+  /banner/generate/{id}:
+    get:
+      description: Returns status, variants (URLs / b64) and failure info for a generation
+        job.
+      parameters:
+      - description: Bearer token
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      - description: Generation ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.BannerGenerationResult'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Get banner generation status
+      tags:
+      - banner
   /health:
     get:
       description: Returns the general health status of the query assistant service
@@ -717,3 +891,6 @@ tags:
   name: schema
 - description: Health and readiness checks
   name: health
+- description: Async AI banner image generation via DALL-E 3. POST to start, GET to
+    poll status.
+  name: banner

@@ -15,30 +15,33 @@ import (
 	"gitlab.smartbet.am/golang/query-assistant/internal/handlers"
 )
 
+// FiberServer wraps the Fiber application with all wired handlers.
 type FiberServer struct {
 	app           *fiber.App
 	config        *config.Config
 	queryHandler  *handlers.QueryHandler
 	schemaHandler *handlers.SchemaHandler
 	healthHandler *handlers.HealthHandler
+	bannerHandler *handlers.BannerHandler
 	logger        *logrus.Logger
 }
 
+// NewFiberServer constructs and configures the Fiber server.
 func NewFiberServer(
-	config *config.Config,
+	cfg *config.Config,
 	queryHandler *handlers.QueryHandler,
 	schemaHandler *handlers.SchemaHandler,
 	healthHandler *handlers.HealthHandler,
+	bannerHandler *handlers.BannerHandler,
 	logger *logrus.Logger,
 ) *FiberServer {
 	app := fiber.New(fiber.Config{
-		ReadTimeout:  config.GetServerReadTimeout(),
-		WriteTimeout: config.GetServerWriteTimeout(),
-		IdleTimeout:  config.GetServerIdleTimeout(),
+		ReadTimeout:  cfg.GetServerReadTimeout(),
+		WriteTimeout: cfg.GetServerWriteTimeout(),
+		IdleTimeout:  cfg.GetServerIdleTimeout(),
 		ErrorHandler: customErrorHandler,
 	})
 
-	// Global middleware
 	app.Use(recover.New())
 	app.Use(requestid.New())
 	app.Use(fiberlogger.New(fiberlogger.Config{
@@ -46,55 +49,61 @@ func NewFiberServer(
 	}))
 	app.Use(cors.New(cors.Config{
 		AllowOrigins: "*",
-		AllowHeaders: "Origin, Content-Type, Accept",
+		AllowHeaders: "Origin, Content-Type, Accept, Authorization",
 		AllowMethods: "GET, POST, PUT, DELETE, OPTIONS",
 	}))
 
-	server := &FiberServer{
+	s := &FiberServer{
 		app:           app,
-		config:        config,
+		config:        cfg,
 		queryHandler:  queryHandler,
 		schemaHandler: schemaHandler,
 		healthHandler: healthHandler,
+		bannerHandler: bannerHandler,
 		logger:        logger,
 	}
 
-	server.setupRoutes()
-	return server
+	s.setupRoutes()
+	return s
 }
 
 func (s *FiberServer) setupRoutes() {
-	// Root level health check endpoints
+	// Root-level health checks
 	s.app.Get("/health", s.healthHandler.HealthCheck)
 	s.app.Get("/ready", s.healthHandler.ReadinessCheck)
 	s.app.Get("/live", s.healthHandler.LivenessCheck)
 
-	// Swagger documentation
+	// Swagger docs
 	if s.config.Swagger.Enabled {
 		s.app.Get("/swagger/*", swagger.HandlerDefault)
 	}
 
-	// API v1 routes
+	// API v1
 	v1 := s.app.Group("/api/v1")
 
-	// Health endpoints also under /api/v1
+	// Health
 	v1.Get("/health", s.healthHandler.HealthCheck)
 	v1.Get("/ready", s.healthHandler.ReadinessCheck)
 	v1.Get("/live", s.healthHandler.LivenessCheck)
 
-	// Query routes
+	// Query
 	query := v1.Group("/query")
 	query.Post("/execute", s.queryHandler.ExecuteQuery)
 	query.Post("/validate", s.queryHandler.ValidateQuery)
 	query.Post("/generate", s.queryHandler.GenerateQuery)
 
-	// Schema routes
+	// Schema
 	schema := v1.Group("/schema")
 	schema.Get("/", s.schemaHandler.GetDatabaseSchema)
 	schema.Get("/table/:table", s.schemaHandler.GetTableSchema)
 	schema.Post("/refresh", s.schemaHandler.RefreshSchema)
 
-	// Catch-all route for undefined endpoints
+	// Banner image generation
+	banner := v1.Group("/banner")
+	banner.Post("/generate", s.bannerHandler.Generate)
+	banner.Get("/generate/:id", s.bannerHandler.GetStatus)
+
+	// 404 catch-all
 	s.app.Use("*", func(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 			"error":     "Endpoint not found",
@@ -119,12 +128,10 @@ func (s *FiberServer) Shutdown(ctx context.Context) error {
 func customErrorHandler(c *fiber.Ctx, err error) error {
 	code := fiber.StatusInternalServerError
 	message := "Internal Server Error"
-
 	if e, ok := err.(*fiber.Error); ok {
 		code = e.Code
 		message = e.Message
 	}
-
 	return c.Status(code).JSON(fiber.Map{
 		"error":      message,
 		"code":       code,

@@ -43,6 +43,10 @@ const mockConfig = `{
 		"allowed_operations": ["SELECT"],
 		"forbidden_keywords": ["DROP", "DELETE", "TRUNCATE", "ALTER", "CREATE", "INSERT", "UPDATE"]
 	},
+	"banner": {
+		"variant_count": 4,
+		"default_provider": "openai"
+	},
 	"swagger": {
 		"enabled": true,
 		"host": "localhost:8080",
@@ -52,6 +56,10 @@ const mockConfig = `{
 	"logging": {
 		"graylog_addr": "gelf-udp-service:12222",
 		"service_name": "query-assistant"
+	},
+	"auth": {
+		"jwt_secret": "your-secret-key",
+		"skip_auth": true
 	}
 }`
 
@@ -60,8 +68,10 @@ type Config struct {
 	ClickHouse ClickHouseConfig `json:"clickhouse"`
 	OpenAI     OpenAIConfig     `json:"openai"`
 	Query      QueryConfig      `json:"query"`
+	Banner     BannerConfig     `json:"banner"`
 	Swagger    SwaggerConfig    `json:"swagger"`
 	Logging    LoggingConfig    `json:"logging"`
+	Auth       AuthConfig       `json:"auth"`
 }
 
 type ServerConfig struct {
@@ -99,6 +109,14 @@ type QueryConfig struct {
 	ForbiddenKeywords     []string `json:"forbidden_keywords"`
 }
 
+// BannerConfig controls the image-generation feature.
+type BannerConfig struct {
+	// VariantCount is the number of image variants generated per request. Default: 4.
+	VariantCount int `json:"variant_count"`
+	// DefaultProvider selects the image generation backend. Default: "openai".
+	DefaultProvider string `json:"default_provider"`
+}
+
 type SwaggerConfig struct {
 	Enabled bool   `json:"enabled"`
 	Host    string `json:"host"`
@@ -111,47 +129,45 @@ type LoggingConfig struct {
 	ServiceName string `json:"service_name"`
 }
 
-// Helper methods to parse duration strings
-func (c *Config) GetServerReadTimeout() time.Duration {
-	if d, err := time.ParseDuration(c.Server.ReadTimeout); err == nil {
+// AuthConfig holds JWT / auth settings.
+type AuthConfig struct {
+	JWTSecret string `json:"jwt_secret"`
+	SkipAuth  bool   `json:"skip_auth"`
+}
+
+// ---------------------------------------------------------------------------
+// Duration helpers
+// ---------------------------------------------------------------------------
+
+func parseDuration(s string, fallback time.Duration) time.Duration {
+	if d, err := time.ParseDuration(s); err == nil {
 		return d
 	}
-	return 30 * time.Second
+	return fallback
+}
+
+func (c *Config) GetServerReadTimeout() time.Duration {
+	return parseDuration(c.Server.ReadTimeout, 30*time.Second)
 }
 
 func (c *Config) GetServerWriteTimeout() time.Duration {
-	if d, err := time.ParseDuration(c.Server.WriteTimeout); err == nil {
-		return d
-	}
-	return 30 * time.Second
+	return parseDuration(c.Server.WriteTimeout, 30*time.Second)
 }
 
 func (c *Config) GetServerIdleTimeout() time.Duration {
-	if d, err := time.ParseDuration(c.Server.IdleTimeout); err == nil {
-		return d
-	}
-	return 120 * time.Second
+	return parseDuration(c.Server.IdleTimeout, 120*time.Second)
 }
 
 func (c *Config) GetQueryTimeout() time.Duration {
-	if d, err := time.ParseDuration(c.ClickHouse.QueryTimeout); err == nil {
-		return d
-	}
-	return 60 * time.Second
+	return parseDuration(c.ClickHouse.QueryTimeout, 60*time.Second)
 }
 
 func (c *Config) GetMaxExecutionTime() time.Duration {
-	if d, err := time.ParseDuration(c.Query.MaxExecutionTime); err == nil {
-		return d
-	}
-	return 30 * time.Second
+	return parseDuration(c.Query.MaxExecutionTime, 30*time.Second)
 }
 
 func (c *Config) GetOpenAITimeout() time.Duration {
-	if d, err := time.ParseDuration(c.OpenAI.Timeout); err == nil {
-		return d
-	}
-	return 30 * time.Second
+	return parseDuration(c.OpenAI.Timeout, 30*time.Second)
 }
 
 func (c *Config) GetClickHouseDSN() string {
@@ -163,6 +179,10 @@ func (c *Config) GetClickHouseDSN() string {
 		c.ClickHouse.Database,
 	)
 }
+
+// ---------------------------------------------------------------------------
+// Loader
+// ---------------------------------------------------------------------------
 
 func (cnf *Config) run(serviceName string) error {
 	var data []byte
@@ -183,9 +203,8 @@ func (cnf *Config) run(serviceName string) error {
 		return fmt.Errorf("failed to unmarshal config: %w", err)
 	}
 
-	// Override with environment variables if present
 	cnf.overrideWithEnv()
-
+	cnf.applyDefaults()
 	return nil
 }
 
@@ -210,7 +229,16 @@ func (c *Config) overrideWithEnv() {
 	}
 }
 
-// Provider creates a new config instance using Uber FX lifecycle
+func (c *Config) applyDefaults() {
+	if c.Banner.VariantCount <= 0 {
+		c.Banner.VariantCount = 4
+	}
+	if c.Banner.DefaultProvider == "" {
+		c.Banner.DefaultProvider = "openai"
+	}
+}
+
+// Provider creates a new config instance using Uber FX lifecycle.
 func Provider(lifecycle fx.Lifecycle, serviceName string) (*Config, error) {
 	c := &Config{}
 	err := c.run(serviceName)

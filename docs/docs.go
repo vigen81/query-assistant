@@ -19,6 +19,117 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/banner/generate": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Accepts a banner generation request and returns a generation ID immediately.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "banner"
+                ],
+                "summary": "Start async banner image generation",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bearer token",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "Generation parameters",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.BannerGenerationRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "$ref": "#/definitions/models.BannerGenerationAccepted"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/banner/generate/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Returns status, variants (URLs / b64) and failure info for a generation job.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "banner"
+                ],
+                "summary": "Get banner generation status",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bearer token",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Generation ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.BannerGenerationResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/health": {
             "get": {
                 "description": "Returns the general health status of the query assistant service",
@@ -462,6 +573,140 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "models.BannerGenerationAccepted": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string",
+                    "example": "2024-01-01T00:00:00Z"
+                },
+                "generation_id": {
+                    "type": "string",
+                    "example": "550e8400-e29b-41d4-a716-446655440000"
+                },
+                "status": {
+                    "type": "string",
+                    "example": "in_progress"
+                }
+            }
+        },
+        "models.BannerGenerationRequest": {
+            "type": "object",
+            "required": [
+                "inputs",
+                "language",
+                "output"
+            ],
+            "properties": {
+                "inputs": {
+                    "$ref": "#/definitions/models.BannerInputs"
+                },
+                "language": {
+                    "description": "e.g. \"en\"",
+                    "type": "string"
+                },
+                "output": {
+                    "$ref": "#/definitions/models.BannerOutputParams"
+                }
+            }
+        },
+        "models.BannerGenerationResult": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string",
+                    "example": "2024-01-01T00:00:00Z"
+                },
+                "failure_reason": {
+                    "type": "string",
+                    "example": "dall-e-3 generation failed: rate limit"
+                },
+                "generation_id": {
+                    "type": "string",
+                    "example": "550e8400-e29b-41d4-a716-446655440000"
+                },
+                "status": {
+                    "type": "string",
+                    "example": "completed"
+                },
+                "updated_at": {
+                    "type": "string",
+                    "example": "2024-01-01T00:00:05Z"
+                },
+                "variants": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.BannerVariant"
+                    }
+                }
+            }
+        },
+        "models.BannerInputs": {
+            "type": "object",
+            "properties": {
+                "creative_description": {
+                    "type": "string",
+                    "example": "Gold coins and dramatic lighting"
+                },
+                "cta_text": {
+                    "type": "string",
+                    "example": "Claim Now"
+                },
+                "headline": {
+                    "type": "string",
+                    "example": "Get 100% Bonus on First Deposit"
+                },
+                "secondary_text": {
+                    "type": "string",
+                    "example": "Up to $500 matched. T\u0026Cs apply."
+                },
+                "visual_style": {
+                    "type": "string",
+                    "example": "dark_luxury"
+                }
+            }
+        },
+        "models.BannerOutputParams": {
+            "type": "object",
+            "properties": {
+                "format": {
+                    "type": "string",
+                    "example": "url"
+                },
+                "height": {
+                    "type": "integer",
+                    "example": 1024
+                },
+                "max_size_kb": {
+                    "type": "integer",
+                    "example": 2048
+                },
+                "width": {
+                    "type": "integer",
+                    "example": 1792
+                }
+            }
+        },
+        "models.BannerVariant": {
+            "type": "object",
+            "properties": {
+                "b64_json": {
+                    "type": "string"
+                },
+                "index": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "revised_prompt": {
+                    "type": "string",
+                    "example": "A high-quality promotional banner..."
+                },
+                "url": {
+                    "type": "string",
+                    "example": "https://oaidalleapiprodscus.blob.core.windows.net/..."
+                }
+            }
+        },
         "models.ColumnMetadata": {
             "type": "object",
             "properties": {
@@ -1004,6 +1249,10 @@ const docTemplate = `{
         {
             "description": "Health and readiness checks",
             "name": "health"
+        },
+        {
+            "description": "Async AI banner image generation via DALL-E 3. POST to start, GET to poll status.",
+            "name": "banner"
         }
     ]
 }`
@@ -1015,7 +1264,7 @@ var SwaggerInfo = &swag.Spec{
 	BasePath:         "/api/v1",
 	Schemes:          []string{},
 	Title:            "Query Assistant API",
-	Description:      "An intelligent query assistant that uses ChatGPT to generate and execute ClickHouse queries based on natural language prompts with multi-tenant support.\n\n## Features\n- **Natural Language Processing**: Convert plain English prompts to ClickHouse SQL queries\n- **Multi-Tenant Support**: All queries are filtered by site_id for data isolation\n- **Schema-Aware**: Understands your database schema for accurate query generation\n- **Business Logic**: Built-in understanding of gaming metrics (GGR = Bet - Win)\n- **Query Execution**: Automatically executes generated queries with timeout protection\n- **Secure**: Query validation, site_id enforcement, and execution limits\n- **Observable**: Structured logging with Graylog integration\n\n## Important Business Rules\n- **GGR Calculation**: Gross Gaming Revenue is always calculated as Total Bet - Total Win\n- **Site Isolation**: All queries are automatically filtered by site_id\n- **Archive Tables**: Queries on archive tables always include created_at filters\n- **RMT Tables**: Tables with 'rmt' in name use FINAL keyword for consistency\n\n## Multi-Tenant Architecture\nAll API endpoints require a numeric site_id parameter to ensure data isolation between different sites/tenants.\nThe system automatically adds WHERE site_id = {your_site_id} to all generated queries.\n\n## Authentication\nMost endpoints require a Bearer token in the Authorization header:\nAuthorization: Bearer {your-jwt-token}",
+	Description:      "An intelligent query assistant that uses ChatGPT to generate and execute ClickHouse queries based on natural language prompts with multi-tenant support.\n\n## Features\n- **Natural Language Processing**: Convert plain English prompts to ClickHouse SQL queries\n- **Multi-Tenant Support**: All queries are filtered by site_id for data isolation\n- **Schema-Aware**: Understands your database schema for accurate query generation\n- **Business Logic**: Built-in understanding of gaming metrics (GGR = Bet - Win)\n- **Query Execution**: Automatically executes generated queries with timeout protection\n- **Secure**: Query validation, site_id enforcement, and execution limits\n- **Observable**: Structured logging with Graylog integration\n- **Banner Generation**: Async AI-powered marketing banner image generation via DALL-E 3\n\n## Important Business Rules\n- **GGR Calculation**: Gross Gaming Revenue is always calculated as Total Bet - Total Win\n- **Site Isolation**: All queries are automatically filtered by site_id\n- **Archive Tables**: Queries on archive tables always include created_at filters\n- **RMT Tables**: Tables with 'rmt' in name use FINAL keyword for consistency\n\n## Multi-Tenant Architecture\nAll API endpoints require a numeric site_id parameter to ensure data isolation between different sites/tenants.\nThe system automatically adds WHERE site_id = {your_site_id} to all generated queries.\n\n## Authentication\nMost endpoints require a Bearer token in the Authorization header:\nAuthorization: Bearer {your-jwt-token}\n\n## Banner Image Generation\nBanner generation is asynchronous. POST to /api/v1/banner/generate to start a job,\nthen poll GET /api/v1/banner/generate/{id} until status is \"completed\" or \"failed\".\nDefault variant count is 4 images per request (configurable via banner.variant_count in config).",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",
