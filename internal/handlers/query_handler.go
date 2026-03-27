@@ -29,14 +29,12 @@ func NewQueryHandler(queryService *services.QueryService, logger *logrus.Logger)
 // @Tags query
 // @Accept json
 // @Produce json
-// @Param Authorization header string true "Bearer token"
 // @Param query body models.QueryRequest true "Query request with required site_id for multi-tenant filtering"
 // @Success 200 {object} models.QueryResponse "Successful query execution with results filtered by site_id"
 // @Failure 400 {object} models.ErrorResponse "Invalid request - missing site_id or invalid format"
 // @Failure 401 {object} models.ErrorResponse "Unauthorized - invalid or missing token"
 // @Failure 408 {object} models.ErrorResponse "Query timeout"
 // @Failure 500 {object} models.ErrorResponse "Internal server error"
-// @Security ApiKeyAuth
 // @Router /query/execute [post]
 func (h *QueryHandler) ExecuteQuery(c *fiber.Ctx) error {
 	var req models.QueryRequest
@@ -144,13 +142,11 @@ func (h *QueryHandler) ExecuteQuery(c *fiber.Ctx) error {
 // @Tags query
 // @Accept json
 // @Produce json
-// @Param Authorization header string true "Bearer token"
 // @Param query body models.QueryValidateRequest true "Query to validate with site_id"
 // @Success 200 {object} models.QueryValidationResult "Validation result with warnings and optimization suggestions"
 // @Failure 400 {object} models.ErrorResponse "Invalid request"
 // @Failure 401 {object} models.ErrorResponse "Unauthorized"
 // @Failure 500 {object} models.ErrorResponse "Internal server error"
-// @Security ApiKeyAuth
 // @Router /query/validate [post]
 func (h *QueryHandler) ValidateQuery(c *fiber.Ctx) error {
 	var req struct {
@@ -193,13 +189,11 @@ func (h *QueryHandler) ValidateQuery(c *fiber.Ctx) error {
 // @Tags query
 // @Accept json
 // @Produce json
-// @Param Authorization header string true "Bearer token"
 // @Param request body models.QueryGenerateRequest true "Generation request with site_id"
 // @Success 200 {object} models.QueryGenerateResponse "Generated SQL query with metadata"
 // @Failure 400 {object} models.ErrorResponse "Invalid request"
 // @Failure 401 {object} models.ErrorResponse "Unauthorized"
 // @Failure 500 {object} models.ErrorResponse "Internal server error"
-// @Security ApiKeyAuth
 // @Router /query/generate [post]
 func (h *QueryHandler) GenerateQuery(c *fiber.Ctx) error {
 	var req struct {
@@ -238,7 +232,6 @@ func (h *QueryHandler) GenerateQuery(c *fiber.Ctx) error {
 // @Description Retrieve the history of previously executed queries with pagination
 // @Tags query
 // @Produce json
-// @Param Authorization header string true "Bearer token"
 // @Param page query int false "Page number" default(1)
 // @Param page_size query int false "Page size" default(50)
 // @Param user_id query string false "Filter by user ID"
@@ -246,7 +239,6 @@ func (h *QueryHandler) GenerateQuery(c *fiber.Ctx) error {
 // @Success 200 {array} models.QueryHistory "List of historical queries"
 // @Failure 401 {object} models.ErrorResponse "Unauthorized"
 // @Failure 500 {object} models.ErrorResponse "Internal server error"
-// @Security ApiKeyAuth
 // @Router /query/history [get]
 func (h *QueryHandler) QueryHistory(c *fiber.Ctx) error {
 	// This would be implemented with a proper query history storage

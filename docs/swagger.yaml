@@ -522,19 +522,12 @@ paths:
       description: Accepts a banner generation request and returns a generation ID
         immediately.
       parameters:
-      - description: Bearer token
-        in: header
-        name: Authorization
-        required: true
-        type: string
       - description: Generation parameters
         in: body
         name: request
         required: true
         schema:
           $ref: '#/definitions/models.BannerGenerationRequest'
-      produces:
-      - application/json
       responses:
         "202":
           description: Accepted
@@ -548,8 +541,6 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/models.ErrorResponse'
-      security:
-      - ApiKeyAuth: []
       summary: Start async banner image generation
       tags:
       - banner
@@ -558,11 +549,6 @@ paths:
       description: Returns status, variants (URLs / b64) and failure info for a generation
         job.
       parameters:
-      - description: Bearer token
-        in: header
-        name: Authorization
-        required: true
-        type: string
       - description: Generation ID
         in: path
         name: id
@@ -583,8 +569,6 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/models.ErrorResponse'
-      security:
-      - ApiKeyAuth: []
       summary: Get banner generation status
       tags:
       - banner
@@ -621,11 +605,6 @@ paths:
       description: Convert a natural language prompt to SQL and execute it against
         ClickHouse with site_id filtering for multi-tenancy
       parameters:
-      - description: Bearer token
-        in: header
-        name: Authorization
-        required: true
-        type: string
       - description: Query request with required site_id for multi-tenant filtering
         in: body
         name: query
@@ -655,8 +634,6 @@ paths:
           description: Internal server error
           schema:
             $ref: '#/definitions/models.ErrorResponse'
-      security:
-      - ApiKeyAuth: []
       summary: Execute a natural language query with site filtering
       tags:
       - query
@@ -667,11 +644,6 @@ paths:
       description: Generate a SQL query from natural language prompt without executing
         it
       parameters:
-      - description: Bearer token
-        in: header
-        name: Authorization
-        required: true
-        type: string
       - description: Generation request with site_id
         in: body
         name: request
@@ -697,8 +669,6 @@ paths:
           description: Internal server error
           schema:
             $ref: '#/definitions/models.ErrorResponse'
-      security:
-      - ApiKeyAuth: []
       summary: Generate SQL query
       tags:
       - query
@@ -706,11 +676,6 @@ paths:
     get:
       description: Retrieve the history of previously executed queries with pagination
       parameters:
-      - description: Bearer token
-        in: header
-        name: Authorization
-        required: true
-        type: string
       - default: 1
         description: Page number
         in: query
@@ -746,8 +711,6 @@ paths:
           description: Internal server error
           schema:
             $ref: '#/definitions/models.ErrorResponse'
-      security:
-      - ApiKeyAuth: []
       summary: Get query history
       tags:
       - query
@@ -758,11 +721,6 @@ paths:
       description: Validate a SQL query for syntax and security without executing
         it, with optimization suggestions
       parameters:
-      - description: Bearer token
-        in: header
-        name: Authorization
-        required: true
-        type: string
       - description: Query to validate with site_id
         in: body
         name: query
@@ -788,8 +746,6 @@ paths:
           description: Internal server error
           schema:
             $ref: '#/definitions/models.ErrorResponse'
-      security:
-      - ApiKeyAuth: []
       summary: Validate a SQL query
       tags:
       - query
@@ -878,11 +834,6 @@ paths:
       summary: Get table schema
       tags:
       - schema
-securityDefinitions:
-  ApiKeyAuth:
-    in: header
-    name: Authorization
-    type: apiKey
 swagger: "2.0"
 tags:
 - description: Query generation and execution operations with multi-tenant support

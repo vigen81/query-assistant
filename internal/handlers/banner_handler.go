@@ -32,13 +32,10 @@ func NewBannerHandler(bannerService *services.BannerService, logger *logrus.Logg
 //
 // @Tags         banner
 // @Accept       json
-// @Produce      json
-// @Param        Authorization  header    string                          true  "Bearer token"
 // @Param        request        body      models.BannerGenerationRequest  true  "Generation parameters"
 // @Success      202            {object}  models.BannerGenerationAccepted
 // @Failure      400            {object}  models.ErrorResponse
 // @Failure      500            {object}  models.ErrorResponse
-// @Security     ApiKeyAuth
 // @Router       /banner/generate [post]
 func (h *BannerHandler) Generate(c *fiber.Ctx) error {
 	var req models.BannerGenerationRequest
@@ -74,12 +71,10 @@ func (h *BannerHandler) Generate(c *fiber.Ctx) error {
 // @Description  Returns status, variants (URLs / b64) and failure info for a generation job.
 // @Tags         banner
 // @Produce      json
-// @Param        Authorization  header    string  true  "Bearer token"
 // @Param        id             path      string  true  "Generation ID"
 // @Success      200            {object}  models.BannerGenerationResult
 // @Failure      400            {object}  models.ErrorResponse
 // @Failure      404            {object}  models.ErrorResponse
-// @Security     ApiKeyAuth
 // @Router       /banner/generate/{id} [get]
 func (h *BannerHandler) GetStatus(c *fiber.Ctx) error {
 	generationID := c.Params("id")

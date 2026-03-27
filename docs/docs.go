@@ -21,16 +21,8 @@ const docTemplate = `{
     "paths": {
         "/banner/generate": {
             "post": {
-                "security": [
-                    {
-                        "ApiKeyAuth": []
-                    }
-                ],
                 "description": "Accepts a banner generation request and returns a generation ID immediately.",
                 "consumes": [
-                    "application/json"
-                ],
-                "produces": [
                     "application/json"
                 ],
                 "tags": [
@@ -38,13 +30,6 @@ const docTemplate = `{
                 ],
                 "summary": "Start async banner image generation",
                 "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bearer token",
-                        "name": "Authorization",
-                        "in": "header",
-                        "required": true
-                    },
                     {
                         "description": "Generation parameters",
                         "name": "request",
@@ -79,11 +64,6 @@ const docTemplate = `{
         },
         "/banner/generate/{id}": {
             "get": {
-                "security": [
-                    {
-                        "ApiKeyAuth": []
-                    }
-                ],
                 "description": "Returns status, variants (URLs / b64) and failure info for a generation job.",
                 "produces": [
                     "application/json"
@@ -93,13 +73,6 @@ const docTemplate = `{
                 ],
                 "summary": "Get banner generation status",
                 "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bearer token",
-                        "name": "Authorization",
-                        "in": "header",
-                        "required": true
-                    },
                     {
                         "type": "string",
                         "description": "Generation ID",
@@ -172,11 +145,6 @@ const docTemplate = `{
         },
         "/query/execute": {
             "post": {
-                "security": [
-                    {
-                        "ApiKeyAuth": []
-                    }
-                ],
                 "description": "Convert a natural language prompt to SQL and execute it against ClickHouse with site_id filtering for multi-tenancy",
                 "consumes": [
                     "application/json"
@@ -189,13 +157,6 @@ const docTemplate = `{
                 ],
                 "summary": "Execute a natural language query with site filtering",
                 "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bearer token",
-                        "name": "Authorization",
-                        "in": "header",
-                        "required": true
-                    },
                     {
                         "description": "Query request with required site_id for multi-tenant filtering",
                         "name": "query",
@@ -242,11 +203,6 @@ const docTemplate = `{
         },
         "/query/generate": {
             "post": {
-                "security": [
-                    {
-                        "ApiKeyAuth": []
-                    }
-                ],
                 "description": "Generate a SQL query from natural language prompt without executing it",
                 "consumes": [
                     "application/json"
@@ -259,13 +215,6 @@ const docTemplate = `{
                 ],
                 "summary": "Generate SQL query",
                 "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bearer token",
-                        "name": "Authorization",
-                        "in": "header",
-                        "required": true
-                    },
                     {
                         "description": "Generation request with site_id",
                         "name": "request",
@@ -306,11 +255,6 @@ const docTemplate = `{
         },
         "/query/history": {
             "get": {
-                "security": [
-                    {
-                        "ApiKeyAuth": []
-                    }
-                ],
                 "description": "Retrieve the history of previously executed queries with pagination",
                 "produces": [
                     "application/json"
@@ -320,13 +264,6 @@ const docTemplate = `{
                 ],
                 "summary": "Get query history",
                 "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bearer token",
-                        "name": "Authorization",
-                        "in": "header",
-                        "required": true
-                    },
                     {
                         "type": "integer",
                         "default": 1,
@@ -381,11 +318,6 @@ const docTemplate = `{
         },
         "/query/validate": {
             "post": {
-                "security": [
-                    {
-                        "ApiKeyAuth": []
-                    }
-                ],
                 "description": "Validate a SQL query for syntax and security without executing it, with optimization suggestions",
                 "consumes": [
                     "application/json"
@@ -398,13 +330,6 @@ const docTemplate = `{
                 ],
                 "summary": "Validate a SQL query",
                 "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bearer token",
-                        "name": "Authorization",
-                        "in": "header",
-                        "required": true
-                    },
                     {
                         "description": "Query to validate with site_id",
                         "name": "query",
@@ -1228,13 +1153,6 @@ const docTemplate = `{
                     "example": "user_id"
                 }
             }
-        }
-    },
-    "securityDefinitions": {
-        "ApiKeyAuth": {
-            "type": "apiKey",
-            "name": "Authorization",
-            "in": "header"
         }
     },
     "tags": [

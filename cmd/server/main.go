@@ -63,10 +63,6 @@ import (
 // @host dev.smartbet.live
 // @BasePath /query-assistant/api/v1
 
-// @securityDefinitions.apikey ApiKeyAuth
-// @in header
-// @name Authorization
-
 // @tag.name query
 // @tag.description Query generation and execution operations with multi-tenant support
 
