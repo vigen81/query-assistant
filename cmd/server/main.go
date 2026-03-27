@@ -6,6 +6,7 @@ import (
 
 	openaisdk "github.com/sashabaranov/go-openai"
 	"github.com/sirupsen/logrus"
+	"gitlab.smartbet.am/golang/query-assistant/docs"
 	"gitlab.smartbet.am/golang/query-assistant/internal/clickhouse"
 	"gitlab.smartbet.am/golang/query-assistant/internal/config"
 	"gitlab.smartbet.am/golang/query-assistant/internal/handlers"
@@ -60,8 +61,8 @@ import (
 // @contact.name API Support
 // @contact.email support@yourcompany.com
 
-// @host dev.smartbet.live
-// @BasePath /query-assistant/api/v1
+// @host localhost:8080
+// @BasePath /api/v1
 
 // @tag.name query
 // @tag.description Query generation and execution operations with multi-tenant support
@@ -201,10 +202,19 @@ func main() {
 		fx.Invoke(func(
 			lifecycle fx.Lifecycle,
 			fiberServer *server.FiberServer,
+			cfg *config.Config,
 			log *logrus.Logger,
+
 		) {
 			lifecycle.Append(fx.Hook{
 				OnStart: func(ctx context.Context) error {
+
+					if cfg.Swagger.Host != "" {
+						docs.SwaggerInfo.Host = cfg.Swagger.Host
+					}
+					if cfg.Swagger.BasePath != "" {
+						docs.SwaggerInfo.BasePath = cfg.Swagger.BasePath
+					}
 					log.Info("Starting query-assistant application")
 					go func() {
 						if err := fiberServer.Start(":8080"); err != nil {
