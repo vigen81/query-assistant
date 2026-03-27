@@ -81,6 +81,10 @@ func (s *FiberServer) setupRoutes() {
 	// API v1
 	v1 := s.app.Group("/api/v1")
 
+	if s.config.Swagger.Enabled {
+		v1.Get("/swagger/*", swagger.HandlerDefault)
+	}
+
 	// Health
 	v1.Get("/health", s.healthHandler.HealthCheck)
 	v1.Get("/ready", s.healthHandler.ReadinessCheck)
