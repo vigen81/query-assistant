@@ -50,7 +50,6 @@ const mockConfig = `{
 	"swagger": {
 		"enabled": true,
 		"host": "localhost:8080",
-		"base_path": "/api/v1",
 		"title": "Query Assistant API",
 		"version": "1.0"
 	},
@@ -119,11 +118,10 @@ type BannerConfig struct {
 }
 
 type SwaggerConfig struct {
-	Enabled  bool   `json:"enabled"`
-	Host     string `json:"host"`
-	BasePath string `json:"base_path"`
-	Title    string `json:"title"`
-	Version  string `json:"version"`
+	Enabled bool   `json:"enabled"`
+	Host    string `json:"host"`
+	Title   string `json:"title"`
+	Version string `json:"version"`
 }
 
 type LoggingConfig struct {

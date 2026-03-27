@@ -6,7 +6,6 @@ import (
 
 	openaisdk "github.com/sashabaranov/go-openai"
 	"github.com/sirupsen/logrus"
-	"gitlab.smartbet.am/golang/query-assistant/docs"
 	"gitlab.smartbet.am/golang/query-assistant/internal/clickhouse"
 	"gitlab.smartbet.am/golang/query-assistant/internal/config"
 	"gitlab.smartbet.am/golang/query-assistant/internal/handlers"
@@ -208,13 +207,6 @@ func main() {
 		) {
 			lifecycle.Append(fx.Hook{
 				OnStart: func(ctx context.Context) error {
-
-					if cfg.Swagger.Host != "" {
-						docs.SwaggerInfo.Host = cfg.Swagger.Host
-					}
-					if cfg.Swagger.BasePath != "" {
-						docs.SwaggerInfo.BasePath = cfg.Swagger.BasePath
-					}
 					log.Info("Starting query-assistant application")
 					go func() {
 						if err := fiberServer.Start(":8080"); err != nil {

@@ -15,7 +15,6 @@ import (
 	"gitlab.smartbet.am/golang/query-assistant/internal/handlers"
 )
 
-// FiberServer wraps the Fiber application with all wired handlers.
 type FiberServer struct {
 	app           *fiber.App
 	config        *config.Config
@@ -26,7 +25,6 @@ type FiberServer struct {
 	logger        *logrus.Logger
 }
 
-// NewFiberServer constructs and configures the Fiber server.
 func NewFiberServer(
 	cfg *config.Config,
 	queryHandler *handlers.QueryHandler,
@@ -67,45 +65,56 @@ func NewFiberServer(
 	return s
 }
 
-func (s *FiberServer) setupRoutes() {
-	// Root-level health checks
-	s.app.Get("/health", s.healthHandler.HealthCheck)
-	s.app.Get("/ready", s.healthHandler.ReadinessCheck)
-	s.app.Get("/live", s.healthHandler.LivenessCheck)
-
-	// Swagger docs
-	if s.config.Swagger.Enabled {
-		s.app.Get("/swagger/*", swagger.HandlerDefault)
-	}
-
-	// API v1
-	v1 := s.app.Group("/api/v1")
-
-	if s.config.Swagger.Enabled {
-		v1.Get("/swagger/*", swagger.HandlerDefault)
-	}
-
+// registerRoutes attaches all API routes to the given router prefix.
+func (s *FiberServer) registerRoutes(r fiber.Router) {
 	// Health
-	v1.Get("/health", s.healthHandler.HealthCheck)
-	v1.Get("/ready", s.healthHandler.ReadinessCheck)
-	v1.Get("/live", s.healthHandler.LivenessCheck)
+	r.Get("/health", s.healthHandler.HealthCheck)
+	r.Get("/ready", s.healthHandler.ReadinessCheck)
+	r.Get("/live", s.healthHandler.LivenessCheck)
 
 	// Query
-	query := v1.Group("/query")
+	query := r.Group("/query")
 	query.Post("/execute", s.queryHandler.ExecuteQuery)
 	query.Post("/validate", s.queryHandler.ValidateQuery)
 	query.Post("/generate", s.queryHandler.GenerateQuery)
 
 	// Schema
-	schema := v1.Group("/schema")
+	schema := r.Group("/schema")
 	schema.Get("/", s.schemaHandler.GetDatabaseSchema)
 	schema.Get("/table/:table", s.schemaHandler.GetTableSchema)
 	schema.Post("/refresh", s.schemaHandler.RefreshSchema)
 
 	// Banner image generation
-	banner := v1.Group("/banner")
+	banner := r.Group("/banner")
 	banner.Post("/generate", s.bannerHandler.Generate)
 	banner.Get("/generate/:id", s.bannerHandler.GetStatus)
+}
+
+func (s *FiberServer) setupRoutes() {
+	// Swagger
+	if s.config.Swagger.Enabled {
+		s.app.Get("/swagger/*", swagger.HandlerDefault)
+	}
+
+	// 1. Root level — no prefix
+	//    e.g. /banner/generate
+	s.registerRoutes(s.app)
+
+	// 2. /api/v1 — local development direct access
+	//    e.g. /api/v1/banner/generate
+	v1 := s.app.Group("/api/v1")
+	if s.config.Swagger.Enabled {
+		v1.Get("/swagger/*", swagger.HandlerDefault)
+	}
+	s.registerRoutes(v1)
+
+	// 3. /public/api/v1 — gateway type: public prefix
+	//    e.g. /public/api/v1/banner/generate
+	publicV1 := s.app.Group("/public/api/v1")
+	if s.config.Swagger.Enabled {
+		publicV1.Get("/swagger/*", swagger.HandlerDefault)
+	}
+	s.registerRoutes(publicV1)
 
 	// 404 catch-all
 	s.app.Use("*", func(c *fiber.Ctx) error {
