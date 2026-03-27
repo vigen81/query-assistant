@@ -60,8 +60,8 @@ import (
 // @contact.name API Support
 // @contact.email support@yourcompany.com
 
-// @host localhost:8080
-// @BasePath /api/v1
+// @host dev.smartbet.live
+// @BasePath /query-assistant/api/v1
 
 // @securityDefinitions.apikey ApiKeyAuth
 // @in header

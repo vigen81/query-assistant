@@ -10,8 +10,8 @@
         },
         "version": "1.0"
     },
-    "host": "localhost:8080",
-    "basePath": "/api/v1",
+    "host": "dev.smartbet.live",
+    "basePath": "/query-assistant/api/v1",
     "paths": {
         "/banner/generate": {
             "post": {

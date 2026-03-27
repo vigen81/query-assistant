@@ -1,4 +1,4 @@
-basePath: /api/v1
+basePath: /query-assistant/api/v1
 definitions:
   models.BannerGenerationAccepted:
     properties:
@@ -475,7 +475,7 @@ definitions:
         example: user_id
         type: string
     type: object
-host: localhost:8080
+host: dev.smartbet.live
 info:
   contact:
     email: support@yourcompany.com
