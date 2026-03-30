@@ -56,3 +56,11 @@ type BannerGenerationResult struct {
 	CreatedAt     time.Time       `json:"created_at"               example:"2024-01-01T00:00:00Z"`
 	UpdatedAt     time.Time       `json:"updated_at"               example:"2024-01-01T00:00:05Z"`
 }
+
+// BannerErrorResponse is the error response for banner endpoints.
+type BannerErrorResponse struct {
+	Error     string    `json:"error"             example:"Banner generation request failed"`
+	Code      string    `json:"code"              example:"VALIDATION_ERROR"`
+	Message   string    `json:"message,omitempty" example:"inputs.headline is required"`
+	Timestamp time.Time `json:"timestamp"         example:"2024-01-01T00:00:00Z"`
+}

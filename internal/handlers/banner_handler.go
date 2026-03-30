@@ -34,13 +34,13 @@ func NewBannerHandler(bannerService *services.BannerService, logger *logrus.Logg
 // @Accept       json
 // @Param        request        body      models.BannerGenerationRequest  true  "Generation parameters"
 // @Success      202            {object}  models.BannerGenerationAccepted
-// @Failure      400            {object}  models.ErrorResponse
-// @Failure      500            {object}  models.ErrorResponse
+// @Failure      400            {object}  models.BannerErrorResponse
+// @Failure      500            {object}  models.BannerErrorResponse
 // @Router       /banner/generate [post]
 func (h *BannerHandler) Generate(c *fiber.Ctx) error {
 	var req models.BannerGenerationRequest
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(models.ErrorResponse{
+		return c.Status(fiber.StatusBadRequest).JSON(models.BannerErrorResponse{
 			Error:     "Invalid request body",
 			Code:      "INVALID_REQUEST",
 			Message:   err.Error(),
@@ -54,7 +54,7 @@ func (h *BannerHandler) Generate(c *fiber.Ctx) error {
 		status := fiber.StatusBadRequest
 		code := "VALIDATION_ERROR"
 		// Only promotion errors that aren't user input errors get 500.
-		return c.Status(status).JSON(models.ErrorResponse{
+		return c.Status(status).JSON(models.BannerErrorResponse{
 			Error:     "Banner generation request failed",
 			Code:      code,
 			Message:   err.Error(),
@@ -73,13 +73,13 @@ func (h *BannerHandler) Generate(c *fiber.Ctx) error {
 // @Produce      json
 // @Param        id             path      string  true  "Generation ID"
 // @Success      200            {object}  models.BannerGenerationResult
-// @Failure      400            {object}  models.ErrorResponse
-// @Failure      404            {object}  models.ErrorResponse
+// @Failure      400            {object}  models.BannerErrorResponse
+// @Failure      404            {object}  models.BannerErrorResponse
 // @Router       /banner/generate/{id} [get]
 func (h *BannerHandler) GetStatus(c *fiber.Ctx) error {
 	generationID := c.Params("id")
 	if generationID == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(models.ErrorResponse{
+		return c.Status(fiber.StatusBadRequest).JSON(models.BannerErrorResponse{
 			Error:     "Generation ID is required",
 			Code:      "MISSING_ID",
 			Timestamp: time.Now(),
@@ -88,7 +88,7 @@ func (h *BannerHandler) GetStatus(c *fiber.Ctx) error {
 
 	result, err := h.bannerService.GetStatus(generationID)
 	if err != nil {
-		return c.Status(fiber.StatusNotFound).JSON(models.ErrorResponse{
+		return c.Status(fiber.StatusNotFound).JSON(models.BannerErrorResponse{
 			Error:     "Generation not found",
 			Code:      "NOT_FOUND",
 			Message:   err.Error(),

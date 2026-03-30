@@ -10,8 +10,8 @@
         },
         "version": "1.0"
     },
-    "host": "dev.smartbet.live",
-    "basePath": "/query-assistant/api/v1",
+    "host": "localhost:8080",
+    "basePath": "/api/v1",
     "paths": {
         "/banner/generate": {
             "post": {
@@ -44,13 +44,13 @@
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/models.ErrorResponse"
+                            "$ref": "#/definitions/models.BannerErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/models.ErrorResponse"
+                            "$ref": "#/definitions/models.BannerErrorResponse"
                         }
                     }
                 }
@@ -85,13 +85,13 @@
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/models.ErrorResponse"
+                            "$ref": "#/definitions/models.BannerErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/models.ErrorResponse"
+                            "$ref": "#/definitions/models.BannerErrorResponse"
                         }
                     }
                 }
@@ -492,6 +492,27 @@
         }
     },
     "definitions": {
+        "models.BannerErrorResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "example": "VALIDATION_ERROR"
+                },
+                "error": {
+                    "type": "string",
+                    "example": "Banner generation request failed"
+                },
+                "message": {
+                    "type": "string",
+                    "example": "inputs.headline is required"
+                },
+                "timestamp": {
+                    "type": "string",
+                    "example": "2024-01-01T00:00:00Z"
+                }
+            }
+        },
         "models.BannerGenerationAccepted": {
             "type": "object",
             "properties": {

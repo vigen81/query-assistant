@@ -1,5 +1,20 @@
-basePath: /query-assistant/api/v1
+basePath: /api/v1
 definitions:
+  models.BannerErrorResponse:
+    properties:
+      code:
+        example: VALIDATION_ERROR
+        type: string
+      error:
+        example: Banner generation request failed
+        type: string
+      message:
+        example: inputs.headline is required
+        type: string
+      timestamp:
+        example: "2024-01-01T00:00:00Z"
+        type: string
+    type: object
   models.BannerGenerationAccepted:
     properties:
       created_at:
@@ -475,7 +490,7 @@ definitions:
         example: user_id
         type: string
     type: object
-host: dev.smartbet.live
+host: localhost:8080
 info:
   contact:
     email: support@yourcompany.com
@@ -536,11 +551,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/models.ErrorResponse'
+            $ref: '#/definitions/models.BannerErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/models.ErrorResponse'
+            $ref: '#/definitions/models.BannerErrorResponse'
       summary: Start async banner image generation
       tags:
       - banner
@@ -564,11 +579,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/models.ErrorResponse'
+            $ref: '#/definitions/models.BannerErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/models.ErrorResponse'
+            $ref: '#/definitions/models.BannerErrorResponse'
       summary: Get banner generation status
       tags:
       - banner

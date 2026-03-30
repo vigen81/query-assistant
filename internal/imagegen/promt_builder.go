@@ -85,52 +85,72 @@ func (pb *PromptBuilder) Build(language string, p PromptParams) (string, error) 
 // Variables: {width} {height} {headline} {secondary_text} {cta_text}
 //
 //	{visual_style} {creative_description}
-const bannerEnV1 = `Create a high-quality promotional banner image for an online gaming platform.
+const bannerEnV1 = `Generate a premium promotional banner image for an online gaming platform.
 
-Banner size: {width}x{height} pixels.
+CANVAS
+- Size: {width}x{height} pixels
+- Use the requested dimensions and aspect ratio for a single clean banner composition
 
-Visual style preset: {visual_style}
+STYLE
+- Visual style preset: {visual_style}
 
-Main headline text to render clearly in the image:
-"{headline}"
+REQUIRED TEXT
+{headline_block}
+{secondary_text_block}
+{cta_text_block}
 
-Secondary text to render near or below the headline:
-"{secondary_text}"
+TEXT INSTRUCTIONS
+- Use exactly the provided text elements only
+- Do not paraphrase, translate, expand, shorten, duplicate, split incorrectly, or invent any text
+- Do not add extra words, fake text, placeholder text, random symbols, or unreadable microtext
+- All text must be clearly readable and correctly spelled in English
 
-Call-to-action button text:
-"{cta_text}"
+ADDITIONAL CREATIVE GUIDANCE
+{creative_description_block}
 
-Additional creative guidance:
-{creative_description}
+PRIMARY OBJECTIVE
+- Create a professional, modern, premium marketing banner (not an artistic poster)
+- Prioritize text readability and clean promotional layout over artistic complexity
 
-Design requirements:
+LAYOUT RULES
+- Maintain clear visual hierarchy between the provided text elements
+- The headline, when provided, must be the most prominent text element
+- Secondary text, when provided, must appear near or below the headline and remain clearly readable
+- CTA text, when provided, must appear inside a clear, simple, readable button
+- Keep composition balanced, structured, and banner-like
+- Reserve a clean central or upper-central text-safe area
 
-• The banner must look like a professional marketing promotion.
-• The layout must fit a wide banner format.
-• The headline text must be large, clear, and highly readable.
-• Secondary text should be smaller but still clearly readable.
-• The CTA text should appear inside a button or highlighted element.
-• Typography must be clean, modern, and easy to read.
-• Maintain clear visual hierarchy: headline → secondary text → CTA.
+TEXT-SAFE COMPOSITION RULES
+- Keep all decorative elements away from text areas
+- Do not place coins, glow, particles, lighting effects, or abstract elements over or directly behind text
+- Keep background behind text simple, dark enough, and high-contrast
 
-Visual guidance:
+READABILITY RULES
+- Use strong contrast between text and background
+- Keep text large, clear, and visually separated
+- Do not distort, warp, melt, bend, crop, blur, overlap, fragment, or misspell letters
+- Do not crop or cut off any part of the required text
+- Do not duplicate text blocks or render partial text
 
-• Use strong contrast between text and background.
-• The design should feel modern, premium and visually striking.
-• Visual elements may include light effects, glowing accents, and abstract decorative elements.
-• Avoid clutter and keep the layout balanced.
+VISUAL GUIDANCE
+- Premium, modern, visually striking promotional banner
+- May include glow accents, light effects, and controlled decorative elements
+- Keep visual richness controlled and supportive of readability
 
-Strict constraints:
+STRICT CONSTRAINTS
+- Do not include logos
+- Do not include human faces
+- Do not include copyrighted characters
+- Do not include any text other than the provided text elements
 
-• Do NOT include logos.
-• Do NOT include human faces.
-• Do NOT include copyrighted characters.
-• Do NOT add any extra text that was not provided above.
-• All text must be spelled correctly in English.
+FINAL PRIORITY
+1. Exact provided text only
+2. Text readability
+3. Clear marketing layout
+4. Professional banner appearance
+5. Visual richness
 
-Output requirements:
-
-• Produce a single clean banner image.
-• Ensure all text is readable and not distorted.
-• Avoid warped, broken, or misspelled letters.
-• Prioritize text readability over visual effects.`
+OUTPUT
+- Produce one clean promotional banner image
+- Ensure all required text is readable and usable
+- Prioritize readability and correctness over visual effects`

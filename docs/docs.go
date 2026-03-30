@@ -50,13 +50,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/models.ErrorResponse"
+                            "$ref": "#/definitions/models.BannerErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/models.ErrorResponse"
+                            "$ref": "#/definitions/models.BannerErrorResponse"
                         }
                     }
                 }
@@ -91,13 +91,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/models.ErrorResponse"
+                            "$ref": "#/definitions/models.BannerErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/models.ErrorResponse"
+                            "$ref": "#/definitions/models.BannerErrorResponse"
                         }
                     }
                 }
@@ -498,6 +498,27 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "models.BannerErrorResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "example": "VALIDATION_ERROR"
+                },
+                "error": {
+                    "type": "string",
+                    "example": "Banner generation request failed"
+                },
+                "message": {
+                    "type": "string",
+                    "example": "inputs.headline is required"
+                },
+                "timestamp": {
+                    "type": "string",
+                    "example": "2024-01-01T00:00:00Z"
+                }
+            }
+        },
         "models.BannerGenerationAccepted": {
             "type": "object",
             "properties": {
@@ -1178,8 +1199,8 @@ const docTemplate = `{
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
 	Version:          "1.0",
-	Host:             "dev.smartbet.live",
-	BasePath:         "/query-assistant/api/v1",
+	Host:             "localhost:8080",
+	BasePath:         "/api/v1",
 	Schemes:          []string{},
 	Title:            "Query Assistant API",
 	Description:      "An intelligent query assistant that uses ChatGPT to generate and execute ClickHouse queries based on natural language prompts with multi-tenant support.\n\n## Features\n- **Natural Language Processing**: Convert plain English prompts to ClickHouse SQL queries\n- **Multi-Tenant Support**: All queries are filtered by site_id for data isolation\n- **Schema-Aware**: Understands your database schema for accurate query generation\n- **Business Logic**: Built-in understanding of gaming metrics (GGR = Bet - Win)\n- **Query Execution**: Automatically executes generated queries with timeout protection\n- **Secure**: Query validation, site_id enforcement, and execution limits\n- **Observable**: Structured logging with Graylog integration\n- **Banner Generation**: Async AI-powered marketing banner image generation via DALL-E 3\n\n## Important Business Rules\n- **GGR Calculation**: Gross Gaming Revenue is always calculated as Total Bet - Total Win\n- **Site Isolation**: All queries are automatically filtered by site_id\n- **Archive Tables**: Queries on archive tables always include created_at filters\n- **RMT Tables**: Tables with 'rmt' in name use FINAL keyword for consistency\n\n## Multi-Tenant Architecture\nAll API endpoints require a numeric site_id parameter to ensure data isolation between different sites/tenants.\nThe system automatically adds WHERE site_id = {your_site_id} to all generated queries.\n\n## Authentication\nMost endpoints require a Bearer token in the Authorization header:\nAuthorization: Bearer {your-jwt-token}\n\n## Banner Image Generation\nBanner generation is asynchronous. POST to /api/v1/banner/generate to start a job,\nthen poll GET /api/v1/banner/generate/{id} until status is \"completed\" or \"failed\".\nDefault variant count is 4 images per request (configurable via banner.variant_count in config).",
