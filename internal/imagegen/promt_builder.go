@@ -67,11 +67,11 @@ func (pb *PromptBuilder) Build(language string, p PromptParams) (string, error) 
 	rendered := tpl
 	rendered = strings.ReplaceAll(rendered, "{width}", fmt.Sprintf("%d", p.Width))
 	rendered = strings.ReplaceAll(rendered, "{height}", fmt.Sprintf("%d", p.Height))
-	rendered = strings.ReplaceAll(rendered, "{headline}", p.Headline)
-	rendered = strings.ReplaceAll(rendered, "{secondary_text}", p.SecondaryText)
-	rendered = strings.ReplaceAll(rendered, "{cta_text}", p.CTAText)
+	rendered = strings.ReplaceAll(rendered, "{headline_block}", p.Headline)
+	rendered = strings.ReplaceAll(rendered, "{secondary_text_block}", p.SecondaryText)
+	rendered = strings.ReplaceAll(rendered, "{cta_text_block}", p.CTAText)
 	rendered = strings.ReplaceAll(rendered, "{visual_style}", p.VisualStyle)
-	rendered = strings.ReplaceAll(rendered, "{creative_description}", p.CreativeDescription)
+	rendered = strings.ReplaceAll(rendered, "{creative_description_block}", p.CreativeDescription)
 
 	return rendered, nil
 }

@@ -105,6 +105,14 @@ func (s *BannerService) Generate(ctx context.Context, req *models.BannerGenerati
 	go s.generateVariants(context.Background(), generationID, genReq)
 
 	s.logger.WithFields(logrus.Fields{
+		"generation_id":   generationID,
+		"prompt":          genReq.Prompt,
+		"width":           genReq.Width,
+		"height":          genReq.Height,
+		"response_format": genReq.ResponseFormat,
+	}).Info("Image generation request")
+
+	s.logger.WithFields(logrus.Fields{
 		"generation_id": generationID,
 		"language":      req.Language,
 		"provider":      s.provider.Name(),

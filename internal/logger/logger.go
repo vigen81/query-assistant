@@ -23,18 +23,16 @@ func init() {
 	log.SetLevel(log.DebugLevel)
 	log.SetOutput(os.Stdout)
 
-	// Initialize Graylog hook
+	// Initialize Graylog hook if GRAYLOG_ADDR is set
 	graylogAddr := os.Getenv("GRAYLOG_ADDR")
-	if graylogAddr == "" {
-		graylogAddr = "gelf-udp-service:12222"
+	if graylogAddr != "" {
+		hook := graylog.NewGraylogHook(graylogAddr, map[string]interface{}{
+			"service": "query-assistant",
+		})
+		log.AddHook(hook)
 	}
 
-	hook := graylog.NewGraylogHook(graylogAddr, map[string]interface{}{
-		"service": "query-assistant",
-	})
-
 	Log = log.StandardLogger()
-	Log.AddHook(hook)
 }
 
 // NewLogger creates a new logger instance for Uber FX
