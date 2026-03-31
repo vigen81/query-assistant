@@ -88,6 +88,7 @@ func (s *FiberServer) registerRoutes(r fiber.Router) {
 	banner := r.Group("/banner")
 	banner.Post("/generate", s.bannerHandler.Generate)
 	banner.Get("/generate/:id", s.bannerHandler.GetStatus)
+	banner.Get("/generate/:id/variant/:index/image", s.bannerHandler.GetVariantImage)
 }
 
 func (s *FiberServer) setupRoutes() {

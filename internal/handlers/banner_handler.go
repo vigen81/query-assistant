@@ -1,6 +1,9 @@
 package handlers
 
 import (
+	"encoding/base64"
+	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -95,4 +98,99 @@ func (h *BannerHandler) GetStatus(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(result)
+}
+
+// GetVariantImage serves a generated variant as a raw PNG image.
+// Open this URL directly in the browser to view the image.
+//
+// @Summary      View banner variant as image
+// @Description  Decodes the b64_json of a variant and serves it as a PNG.
+//
+//	Open this URL directly in the browser to view the image.
+//
+// @Tags         banner
+// @Produce      png
+// @Param        id     path  string  true  "Generation ID"
+// @Param        index  path  int     true  "Variant index (0-3)"
+// @Success      200    {file}    binary
+// @Failure      404    {object}  models.BannerErrorResponse
+// @Router       /banner/generate/{id}/variant/{index}/image [get]
+func (h *BannerHandler) GetVariantImage(c *fiber.Ctx) error {
+	generationID := c.Params("id")
+	indexStr := c.Params("index")
+
+	index, err := strconv.Atoi(indexStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(models.BannerErrorResponse{
+			Error:     "Invalid variant index",
+			Code:      "INVALID_INDEX",
+			Message:   "index must be a number",
+			Timestamp: time.Now(),
+		})
+	}
+
+	result, err := h.bannerService.GetStatus(generationID)
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(models.BannerErrorResponse{
+			Error:     "Generation not found",
+			Code:      "NOT_FOUND",
+			Message:   err.Error(),
+			Timestamp: time.Now(),
+		})
+	}
+
+	if result.Status != models.GenerationStatusCompleted {
+		return c.Status(fiber.StatusNotFound).JSON(models.BannerErrorResponse{
+			Error:     "Generation not completed yet",
+			Code:      "NOT_READY",
+			Message:   fmt.Sprintf("current status: %s", result.Status),
+			Timestamp: time.Now(),
+		})
+	}
+
+	// Find the variant by index
+	var variant *models.BannerVariant
+	for i := range result.Variants {
+		if result.Variants[i].Index == index {
+			variant = &result.Variants[i]
+			break
+		}
+	}
+
+	if variant == nil {
+		return c.Status(fiber.StatusNotFound).JSON(models.BannerErrorResponse{
+			Error:     "Variant not found",
+			Code:      "VARIANT_NOT_FOUND",
+			Message:   fmt.Sprintf("variant index %d not found", index),
+			Timestamp: time.Now(),
+		})
+	}
+
+	// If we have a URL just redirect
+	if variant.URL != "" {
+		return c.Redirect(variant.URL)
+	}
+
+	// Decode b64 and serve as PNG
+	if variant.B64JSON == "" {
+		return c.Status(fiber.StatusNotFound).JSON(models.BannerErrorResponse{
+			Error:     "No image data available",
+			Code:      "NO_IMAGE_DATA",
+			Timestamp: time.Now(),
+		})
+	}
+
+	imageBytes, err := base64.StdEncoding.DecodeString(variant.B64JSON)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(models.BannerErrorResponse{
+			Error:     "Failed to decode image",
+			Code:      "DECODE_ERROR",
+			Message:   err.Error(),
+			Timestamp: time.Now(),
+		})
+	}
+
+	c.Set("Content-Type", "image/png")
+	c.Set("Content-Disposition", fmt.Sprintf(`inline; filename="banner_%s_%d.png"`, generationID[:8], index))
+	return c.Send(imageBytes)
 }

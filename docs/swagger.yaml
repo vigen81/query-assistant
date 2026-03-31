@@ -602,6 +602,34 @@ paths:
       summary: Get banner generation status
       tags:
       - banner
+  /banner/generate/{id}/variant/{index}/image:
+    get:
+      description: Decodes the b64_json of a variant and serves it as a PNG.
+      parameters:
+      - description: Generation ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Variant index (0-3)
+        in: path
+        name: index
+        required: true
+        type: integer
+      produces:
+      - image/png
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/models.BannerErrorResponse'
+      summary: View banner variant as image
+      tags:
+      - banner
   /health:
     get:
       description: Returns the general health status of the query assistant service
