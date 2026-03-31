@@ -21,8 +21,11 @@ const docTemplate = `{
     "paths": {
         "/banner/generate": {
             "post": {
-                "description": "Accepts a banner generation request and returns a generation ID immediately.",
+                "description": "Accepts a banner generation request and returns a generation ID immediately (HTTP 202).\nPoll GET /banner/generate/{id} for status and results.\ngpt-image-1 returns b64_json by default — the URL field may be empty.",
                 "consumes": [
+                    "application/json"
+                ],
+                "produces": [
                     "application/json"
                 ],
                 "tags": [
@@ -64,7 +67,7 @@ const docTemplate = `{
         },
         "/banner/generate/{id}": {
             "get": {
-                "description": "Returns status, variants (URLs / b64) and failure info for a generation job.",
+                "description": "Returns status (in_progress / completed / failed), image variants and failure info.\nVariants contain b64_json (base64 encoded PNG) when using gpt-image-1.",
                 "produces": [
                     "application/json"
                 ],
@@ -75,7 +78,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Generation ID",
+                        "description": "Generation ID returned by POST /banner/generate",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -538,18 +541,13 @@ const docTemplate = `{
         },
         "models.BannerGenerationRequest": {
             "type": "object",
-            "required": [
-                "inputs",
-                "language",
-                "output"
-            ],
             "properties": {
                 "inputs": {
                     "$ref": "#/definitions/models.BannerInputs"
                 },
                 "language": {
-                    "description": "e.g. \"en\"",
-                    "type": "string"
+                    "type": "string",
+                    "example": "en"
                 },
                 "output": {
                     "$ref": "#/definitions/models.BannerOutputParams"
@@ -565,7 +563,7 @@ const docTemplate = `{
                 },
                 "failure_reason": {
                     "type": "string",
-                    "example": "dall-e-3 generation failed: rate limit"
+                    "example": "gpt-image-1 generation failed: rate limit exceeded"
                 },
                 "generation_id": {
                     "type": "string",
@@ -577,7 +575,7 @@ const docTemplate = `{
                 },
                 "updated_at": {
                     "type": "string",
-                    "example": "2024-01-01T00:00:05Z"
+                    "example": "2024-01-01T00:00:15Z"
                 },
                 "variants": {
                     "type": "array",
@@ -592,7 +590,7 @@ const docTemplate = `{
             "properties": {
                 "creative_description": {
                     "type": "string",
-                    "example": "Gold coins and dramatic lighting"
+                    "example": "Abstract geometric shapes, gold and dark background, premium feel"
                 },
                 "cta_text": {
                     "type": "string",
@@ -604,7 +602,7 @@ const docTemplate = `{
                 },
                 "secondary_text": {
                     "type": "string",
-                    "example": "Up to $500 matched. T\u0026Cs apply."
+                    "example": "Up to $500 matched. Terms apply."
                 },
                 "visual_style": {
                     "type": "string",
@@ -615,10 +613,6 @@ const docTemplate = `{
         "models.BannerOutputParams": {
             "type": "object",
             "properties": {
-                "format": {
-                    "type": "string",
-                    "example": "url"
-                },
                 "height": {
                     "type": "integer",
                     "example": 1024
@@ -629,7 +623,7 @@ const docTemplate = `{
                 },
                 "width": {
                     "type": "integer",
-                    "example": 1792
+                    "example": 1024
                 }
             }
         },
@@ -643,13 +637,37 @@ const docTemplate = `{
                     "type": "integer",
                     "example": 0
                 },
+                "metadata": {
+                    "$ref": "#/definitions/models.BannerVariantMetadata"
+                },
                 "revised_prompt": {
                     "type": "string",
-                    "example": "A high-quality promotional banner..."
+                    "example": "A high-quality promotional banner with dark luxury style..."
                 },
                 "url": {
                     "type": "string",
-                    "example": "https://oaidalleapiprodscus.blob.core.windows.net/..."
+                    "example": "https://oaidalleapiprodscus.blob.core.windows.net/private/..."
+                }
+            }
+        },
+        "models.BannerVariantMetadata": {
+            "type": "object",
+            "properties": {
+                "content_type": {
+                    "type": "string",
+                    "example": "image/png"
+                },
+                "file_size_kb": {
+                    "type": "integer",
+                    "example": 856
+                },
+                "height": {
+                    "type": "integer",
+                    "example": 1024
+                },
+                "width": {
+                    "type": "integer",
+                    "example": 1024
                 }
             }
         },

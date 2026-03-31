@@ -15,13 +15,10 @@ import (
 )
 
 // defaultVariantCount is the number of image variants generated per request.
-// This is overridable via BannerServiceConfig.
 const defaultVariantCount = 4
 
 // BannerServiceConfig holds tuneable parameters for BannerService.
 type BannerServiceConfig struct {
-	// VariantCount is how many image variants to generate per request.
-	// Defaults to 4.
 	VariantCount int
 }
 
@@ -35,7 +32,6 @@ type BannerService struct {
 }
 
 // NewBannerService constructs the service.
-// cfg may be nil — defaults will be applied.
 func NewBannerService(
 	provider imagegen.Provider,
 	promptBuilder *imagegen.PromptBuilder,
@@ -66,11 +62,8 @@ func (s *BannerService) Generate(ctx context.Context, req *models.BannerGenerati
 	if req.Language == "" {
 		req.Language = "en"
 	}
-	if req.Output.Format == "" {
-		req.Output.Format = "url"
-	}
 
-	// Build prompt synchronously so we can return an error before storing anything.
+	// Build prompt synchronously so we fail fast on template errors.
 	prompt, err := s.promptBuilder.Build(req.Language, imagegen.PromptParams{
 		Width:               req.Output.Width,
 		Height:              req.Output.Height,
@@ -95,22 +88,13 @@ func (s *BannerService) Generate(ctx context.Context, req *models.BannerGenerati
 	})
 
 	genReq := imagegen.GenerationRequest{
-		Prompt:         prompt,
-		Width:          req.Output.Width,
-		Height:         req.Output.Height,
-		ResponseFormat: req.Output.Format,
+		Prompt: prompt,
+		Width:  req.Output.Width,
+		Height: req.Output.Height,
 	}
 
-	// Async generation — runs after the HTTP response is sent.
+	// Async fan-out — runs after HTTP response is sent.
 	go s.generateVariants(context.Background(), generationID, genReq)
-
-	s.logger.WithFields(logrus.Fields{
-		"generation_id":   generationID,
-		"prompt":          genReq.Prompt,
-		"width":           genReq.Width,
-		"height":          genReq.Height,
-		"response_format": genReq.ResponseFormat,
-	}).Info("Image generation request")
 
 	s.logger.WithFields(logrus.Fields{
 		"generation_id": generationID,
@@ -151,12 +135,13 @@ func (s *BannerService) generateVariants(ctx context.Context, generationID strin
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
+			// Stagger requests slightly to avoid simultaneous rate limit hits.
+			time.Sleep(time.Duration(idx) * 500 * time.Millisecond)
 			img, err := s.provider.Generate(ctx, req)
 			results <- variantResult{index: idx, img: img, err: err}
 		}(i)
 	}
 
-	// Close results channel once all goroutines finish.
 	go func() {
 		wg.Wait()
 		close(results)
@@ -195,7 +180,7 @@ func (s *BannerService) generateVariants(ctx context.Context, generationID strin
 		return
 	}
 
-	// Sort variants by their original index for deterministic ordering.
+	// Sort variants by original index for deterministic ordering.
 	sort.Slice(variants, func(i, j int) bool {
 		return variants[i].Index < variants[j].Index
 	})

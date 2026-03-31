@@ -26,16 +26,16 @@ func NewBannerHandler(bannerService *services.BannerService, logger *logrus.Logg
 // Generate accepts a banner generation request and returns a generation ID.
 //
 // @Summary      Start async banner image generation
-// @Description  Accepts a banner generation request and returns a generation ID immediately.
-//
-//	Poll GET /banner/generate/:id for status and results.
-//
+// @Description  Accepts a banner generation request and returns a generation ID immediately (HTTP 202).
+// @Description  Poll GET /banner/generate/{id} for status and results.
+// @Description  gpt-image-1 returns b64_json by default — the URL field may be empty.
 // @Tags         banner
 // @Accept       json
-// @Param        request        body      models.BannerGenerationRequest  true  "Generation parameters"
-// @Success      202            {object}  models.BannerGenerationAccepted
-// @Failure      400            {object}  models.BannerErrorResponse
-// @Failure      500            {object}  models.BannerErrorResponse
+// @Produce      json
+// @Param        request  body      models.BannerGenerationRequest  true  "Generation parameters"
+// @Success      202      {object}  models.BannerGenerationAccepted
+// @Failure      400      {object}  models.BannerErrorResponse
+// @Failure      500      {object}  models.BannerErrorResponse
 // @Router       /banner/generate [post]
 func (h *BannerHandler) Generate(c *fiber.Ctx) error {
 	var req models.BannerGenerationRequest
@@ -51,12 +51,9 @@ func (h *BannerHandler) Generate(c *fiber.Ctx) error {
 	accepted, err := h.bannerService.Generate(c.Context(), &req)
 	if err != nil {
 		h.logger.WithError(err).Warn("Banner generation request rejected")
-		status := fiber.StatusBadRequest
-		code := "VALIDATION_ERROR"
-		// Only promotion errors that aren't user input errors get 500.
-		return c.Status(status).JSON(models.BannerErrorResponse{
+		return c.Status(fiber.StatusBadRequest).JSON(models.BannerErrorResponse{
 			Error:     "Banner generation request failed",
-			Code:      code,
+			Code:      "VALIDATION_ERROR",
 			Message:   err.Error(),
 			Timestamp: time.Now(),
 		})
@@ -65,16 +62,17 @@ func (h *BannerHandler) Generate(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusAccepted).JSON(accepted)
 }
 
-// GetStatus returns the current state (and results) of a generation job.
+// GetStatus returns the current state of a generation job.
 //
 // @Summary      Get banner generation status
-// @Description  Returns status, variants (URLs / b64) and failure info for a generation job.
+// @Description  Returns status (in_progress / completed / failed), image variants and failure info.
+// @Description  Variants contain b64_json (base64 encoded PNG) when using gpt-image-1.
 // @Tags         banner
 // @Produce      json
-// @Param        id             path      string  true  "Generation ID"
-// @Success      200            {object}  models.BannerGenerationResult
-// @Failure      400            {object}  models.BannerErrorResponse
-// @Failure      404            {object}  models.BannerErrorResponse
+// @Param        id   path      string  true  "Generation ID returned by POST /banner/generate"
+// @Success      200  {object}  models.BannerGenerationResult
+// @Failure      400  {object}  models.BannerErrorResponse
+// @Failure      404  {object}  models.BannerErrorResponse
 // @Router       /banner/generate/{id} [get]
 func (h *BannerHandler) GetStatus(c *fiber.Ctx) error {
 	generationID := c.Params("id")

@@ -8,18 +8,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// dall3Sizes lists the only sizes DALL-E 3 accepts.
-// We map the requested dimensions to the closest one.
-var dall3Sizes = []struct {
-	w, h int
-	tag  string
-}{
-	{1024, 1024, openai.CreateImageSize1024x1024},
-	{1792, 1024, openai.CreateImageSize1792x1024},
-	{1024, 1792, openai.CreateImageSize1024x1792},
-}
-
-// OpenAIAdapter implements Provider using OpenAI DALL-E 3.
+// OpenAIAdapter implements Provider using OpenAI gpt-image-1.
 type OpenAIAdapter struct {
 	client *openai.Client
 	logger *logrus.Logger
@@ -38,69 +27,43 @@ func NewOpenAIAdapterFromKey(apiKey string, logger *logrus.Logger) *OpenAIAdapte
 	}
 }
 
-func (a *OpenAIAdapter) Name() string { return "openai-dall-e-3" }
+func (a *OpenAIAdapter) Name() string { return "openai-gpt-image-1" }
 
-// Generate sends one DALL-E 3 image generation request.
-// DALL-E 3 only supports n=1 per call; callers must fan-out for multiple variants.
+// Generate sends one gpt-image-1 image generation request.
+// gpt-image-1 only supports n=1 per call; callers must fan-out for multiple variants.
+// gpt-image-1 returns b64_json by default (no response_format parameter supported).
 func (a *OpenAIAdapter) Generate(ctx context.Context, req GenerationRequest) (*GeneratedImage, error) {
-	size := a.nearestSize(req.Width, req.Height)
+	size := fmt.Sprintf("%dx%d", req.Width, req.Height)
 
-	respFmt := openai.CreateImageResponseFormatURL
-	if req.ResponseFormat == "b64_json" {
-		respFmt = openai.CreateImageResponseFormatB64JSON
+	a.logger.WithFields(logrus.Fields{
+		"size":  size,
+		"model": "gpt-image-1",
+	}).Debug("Sending gpt-image-1 generation request")
+
+	resp, err := a.client.CreateImage(ctx, openai.ImageRequest{
+		Model:  "gpt-image-1",
+		Prompt: req.Prompt,
+		N:      1,
+		Size:   size,
+		// response_format is NOT supported by gpt-image-1
+		// gpt-image-1 returns b64_json by default
+	})
+	if err != nil {
+		return nil, fmt.Errorf("gpt-image-1 generation failed: %w", err)
+	}
+	if len(resp.Data) == 0 {
+		return nil, fmt.Errorf("gpt-image-1 returned empty data")
 	}
 
 	a.logger.WithFields(logrus.Fields{
-		"size":   size,
-		"format": respFmt,
-	}).Debug("Sending DALL-E 3 generation request")
+		"has_b64":            len(resp.Data[0].B64JSON) > 0,
+		"has_url":            len(resp.Data[0].URL) > 0,
+		"revised_prompt_len": len(resp.Data[0].RevisedPrompt),
+	}).Debug("gpt-image-1 generation succeeded")
 
-	resp, err := a.client.CreateImage(ctx, openai.ImageRequest{
-		Model:          openai.CreateImageModelDallE3,
-		Prompt:         req.Prompt,
-		N:              1, // DALL-E 3 hard limit
-		Size:           size,
-		Quality:        openai.CreateImageQualityStandard,
-		ResponseFormat: respFmt,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("dall-e-3 generation failed: %w", err)
-	}
-	if len(resp.Data) == 0 {
-		return nil, fmt.Errorf("dall-e-3 returned empty data")
-	}
-
-	img := &GeneratedImage{
+	return &GeneratedImage{
 		URL:           resp.Data[0].URL,
 		B64JSON:       resp.Data[0].B64JSON,
 		RevisedPrompt: resp.Data[0].RevisedPrompt,
-	}
-
-	a.logger.WithField("revised_prompt_len", len(img.RevisedPrompt)).
-		Debug("DALL-E 3 generation succeeded")
-
-	return img, nil
-}
-
-// nearestSize returns the DALL-E 3 size tag whose dimensions are closest
-// (by Manhattan distance) to the requested dimensions.
-func (a *OpenAIAdapter) nearestSize(w, h int) string {
-	best := dall3Sizes[0]
-	bestDist := abs(w-best.w) + abs(h-best.h)
-
-	for _, s := range dall3Sizes[1:] {
-		d := abs(w-s.w) + abs(h-s.h)
-		if d < bestDist {
-			best = s
-			bestDist = d
-		}
-	}
-	return best.tag
-}
-
-func abs(x int) int {
-	if x < 0 {
-		return -x
-	}
-	return x
+	}, nil
 }

@@ -32,14 +32,10 @@ definitions:
       inputs:
         $ref: '#/definitions/models.BannerInputs'
       language:
-        description: e.g. "en"
+        example: en
         type: string
       output:
         $ref: '#/definitions/models.BannerOutputParams'
-    required:
-    - inputs
-    - language
-    - output
     type: object
   models.BannerGenerationResult:
     properties:
@@ -47,7 +43,7 @@ definitions:
         example: "2024-01-01T00:00:00Z"
         type: string
       failure_reason:
-        example: 'dall-e-3 generation failed: rate limit'
+        example: 'gpt-image-1 generation failed: rate limit exceeded'
         type: string
       generation_id:
         example: 550e8400-e29b-41d4-a716-446655440000
@@ -56,7 +52,7 @@ definitions:
         example: completed
         type: string
       updated_at:
-        example: "2024-01-01T00:00:05Z"
+        example: "2024-01-01T00:00:15Z"
         type: string
       variants:
         items:
@@ -66,7 +62,7 @@ definitions:
   models.BannerInputs:
     properties:
       creative_description:
-        example: Gold coins and dramatic lighting
+        example: Abstract geometric shapes, gold and dark background, premium feel
         type: string
       cta_text:
         example: Claim Now
@@ -75,7 +71,7 @@ definitions:
         example: Get 100% Bonus on First Deposit
         type: string
       secondary_text:
-        example: Up to $500 matched. T&Cs apply.
+        example: Up to $500 matched. Terms apply.
         type: string
       visual_style:
         example: dark_luxury
@@ -83,9 +79,6 @@ definitions:
     type: object
   models.BannerOutputParams:
     properties:
-      format:
-        example: url
-        type: string
       height:
         example: 1024
         type: integer
@@ -93,7 +86,7 @@ definitions:
         example: 2048
         type: integer
       width:
-        example: 1792
+        example: 1024
         type: integer
     type: object
   models.BannerVariant:
@@ -103,12 +96,29 @@ definitions:
       index:
         example: 0
         type: integer
+      metadata:
+        $ref: '#/definitions/models.BannerVariantMetadata'
       revised_prompt:
-        example: A high-quality promotional banner...
+        example: A high-quality promotional banner with dark luxury style...
         type: string
       url:
-        example: https://oaidalleapiprodscus.blob.core.windows.net/...
+        example: https://oaidalleapiprodscus.blob.core.windows.net/private/...
         type: string
+    type: object
+  models.BannerVariantMetadata:
+    properties:
+      content_type:
+        example: image/png
+        type: string
+      file_size_kb:
+        example: 856
+        type: integer
+      height:
+        example: 1024
+        type: integer
+      width:
+        example: 1024
+        type: integer
     type: object
   models.ColumnMetadata:
     properties:
@@ -534,8 +544,10 @@ paths:
     post:
       consumes:
       - application/json
-      description: Accepts a banner generation request and returns a generation ID
-        immediately.
+      description: |-
+        Accepts a banner generation request and returns a generation ID immediately (HTTP 202).
+        Poll GET /banner/generate/{id} for status and results.
+        gpt-image-1 returns b64_json by default — the URL field may be empty.
       parameters:
       - description: Generation parameters
         in: body
@@ -543,6 +555,8 @@ paths:
         required: true
         schema:
           $ref: '#/definitions/models.BannerGenerationRequest'
+      produces:
+      - application/json
       responses:
         "202":
           description: Accepted
@@ -561,10 +575,11 @@ paths:
       - banner
   /banner/generate/{id}:
     get:
-      description: Returns status, variants (URLs / b64) and failure info for a generation
-        job.
+      description: |-
+        Returns status (in_progress / completed / failed), image variants and failure info.
+        Variants contain b64_json (base64 encoded PNG) when using gpt-image-1.
       parameters:
-      - description: Generation ID
+      - description: Generation ID returned by POST /banner/generate
         in: path
         name: id
         required: true
