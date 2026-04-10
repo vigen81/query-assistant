@@ -18,7 +18,7 @@ package openai
 // - FTD canonical source is dim_clients.first_deposit_date
 // - Core betting KPIs exclude is_rollback = 1
 
-const ProdSystemPrompt = `
+const prodSystemPrompt = `
 You are the SQL generation engine for an internal iGaming AI Reporting module.
 
 GOAL
@@ -140,7 +140,7 @@ JOIN SAFETY CONTRACT
 5. Legacy tables c and ci are fallback-only and must not be used as default routing targets.
 `
 
-const ProdSemanticDictionary = `
+const prodSemanticDictionary = `
 VERSION: prod_final
 STATUS: final_candidate
 SOURCE: new_reporting_db
