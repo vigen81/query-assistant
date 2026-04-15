@@ -40,7 +40,7 @@ func GetDDLSchema() string {
 	if isProdEnv() {
 		return ""
 	}
-	return devDDLSchema
+	return ""
 }
 
 // GetSemanticVersion returns the semantic dictionary version for the current environment.

@@ -12,11 +12,12 @@ package openai
 //
 // CONFIRMED BUSINESS RULES
 // - client_payments.status = 5 means success
-// - client_payments.payment_type values = Deposit / Withdraw
+// - client_payments.payment_type values = deposit / withdraw
 // - client_bets.operation canonical values = bet / result
 // - client_payments.is_correction is INCLUDED in payment metrics
 // - FTD canonical source is dim_clients.first_deposit_date
 // - Core betting KPIs exclude is_rollback = 1
+// - Phase 1 currency mode: use base amounts by default
 
 const prodSystemPrompt = `
 You are the SQL generation engine for an internal iGaming AI Reporting module.
@@ -41,6 +42,7 @@ NON-NEGOTIABLE SQL RULES
 6. Exclude test data by default where the selected table contains is_test.
 7. Never infer business meanings not explicitly defined in the dictionary.
 8. Never invent aliases. Use only the aliases declared in BASE_TABLES and SAFE_JOINS.
+9. All string enum comparisons must use lowercase values exactly as defined in the database.
 
 ROUTING CONTRACT
 1. Determine query class first:
@@ -92,9 +94,16 @@ PLAYER IDENTITY CONTRACT
 7. When querying or joining cs, preserve site context using site_id whenever the routed base table has site_id.
 8. client_snapshots is the default profile source, but it must always be used with site-aware joins.
 
+CURRENCY CONTRACT
+1. Phase 1 reporting mode is base currency mode.
+2. By default, all monetary outputs must use base amount columns only.
+3. Use original amount columns only when the prompt explicitly requests currency, by-currency output, or client-currency output.
+4. If the prompt explicitly requests currency output, include currency in SELECT and GROUP BY where aggregation is used.
+5. Do not mix original amount columns and base amount columns in the same monetary metric.
+
 PAYMENT CONTRACT
 1. Successful payment means cp.status = 5.
-2. payment_type canonical values are 'Deposit' and 'Withdraw'.
+2. payment_type canonical values are 'deposit' and 'withdraw'.
 3. Payment summary queries must prefer:
    - ct for lifetime summary
    - cdt for daily/date-range summary
@@ -457,98 +466,98 @@ DIMENSION_MAPPINGS:
 
 METRICS_BY_BASE_TABLE:
   ct:
-    deposits_amount: "sum(ct.total_deposit)"
+    deposits_amount: "sum(ct.total_deposit_base)"
     deposits_amount_base: "sum(ct.total_deposit_base)"
     deposits_count: "sum(ct.deposit_count)"
-    withdraw_amount: "sum(ct.total_withdraw)"
+    withdraw_amount: "sum(ct.total_withdraw_base)"
     withdraw_amount_base: "sum(ct.total_withdraw_base)"
     withdraw_count: "sum(ct.withdraw_count)"
-    net_deposit: "sum(ct.total_deposit) - sum(ct.total_withdraw)"
-    bet_amount: "sum(ct.total_bet_amount)"
+    net_deposit: "sum(ct.total_deposit_base) - sum(ct.total_withdraw_base)"
+    bet_amount: "sum(ct.total_bet_amount_base)"
     bet_amount_base: "sum(ct.total_bet_amount_base)"
     bet_count: "sum(ct.bet_count)"
-    bonus_bet_amount: "sum(ct.total_bet_amount_bonus)"
+    bonus_bet_amount: "sum(ct.total_bet_amount_bonus_base)"
     bonus_bet_count: "sum(ct.bet_bonus_count)"
-    result_amount: "sum(ct.total_result_amount)"
+    result_amount: "sum(ct.total_result_amount_base)"
     result_amount_base: "sum(ct.total_result_amount_base)"
-    bonus_result_amount: "sum(ct.total_bonus_result_amount)"
-    ggr: "sum(ct.total_bet_amount) - sum(ct.total_result_amount)"
+    bonus_result_amount: "sum(ct.total_bonus_result_amount_base)"
+    ggr: "sum(ct.total_bet_amount_base) - sum(ct.total_result_amount_base)"
     players_count: "uniqExact(ct.client_id)"
   cdt:
-    deposits_amount: "sum(cdt.total_deposit)"
+    deposits_amount: "sum(cdt.total_deposit_base)"
     deposits_amount_base: "sum(cdt.total_deposit_base)"
     deposits_count: "sum(cdt.deposit_count)"
-    withdraw_amount: "sum(cdt.total_withdraw)"
+    withdraw_amount: "sum(cdt.total_withdraw_base)"
     withdraw_amount_base: "sum(cdt.total_withdraw_base)"
     withdraw_count: "sum(cdt.withdraw_count)"
-    net_deposit: "sum(cdt.total_deposit) - sum(cdt.total_withdraw)"
-    bet_amount: "sum(cdt.total_bet_amount)"
+    net_deposit: "sum(cdt.total_deposit_base) - sum(cdt.total_withdraw_base)"
+    bet_amount: "sum(cdt.total_bet_amount_base)"
     bet_amount_base: "sum(cdt.total_bet_amount_base)"
     bet_count: "sum(cdt.bet_count)"
-    bonus_bet_amount: "sum(cdt.total_bet_amount_bonus)"
+    bonus_bet_amount: "sum(cdt.total_bet_amount_bonus_base)"
     bonus_bet_count: "sum(cdt.bet_bonus_count)"
-    result_amount: "sum(cdt.total_result_amount)"
+    result_amount: "sum(cdt.total_result_amount_base)"
     result_amount_base: "sum(cdt.total_result_amount_base)"
-    bonus_result_amount: "sum(cdt.total_bonus_result_amount)"
-    ggr: "sum(cdt.total_bet_amount) - sum(cdt.total_result_amount)"
+    bonus_result_amount: "sum(cdt.total_bonus_result_amount_base)"
+    ggr: "sum(cdt.total_bet_amount_base) - sum(cdt.total_result_amount_base)"
     players_count: "uniqExact(cdt.client_id)"
   cht:
-    deposits_amount: "sum(cht.total_deposit)"
+    deposits_amount: "sum(cht.total_deposit_base)"
     deposits_amount_base: "sum(cht.total_deposit_base)"
     deposits_count: "sum(cht.deposit_count)"
-    withdraw_amount: "sum(cht.total_withdraw)"
+    withdraw_amount: "sum(cht.total_withdraw_base)"
     withdraw_amount_base: "sum(cht.total_withdraw_base)"
     withdraw_count: "sum(cht.withdraw_count)"
-    net_deposit: "sum(cht.total_deposit) - sum(cht.total_withdraw)"
-    bet_amount: "sum(cht.total_bet_amount)"
+    net_deposit: "sum(cht.total_deposit_base) - sum(cht.total_withdraw_base)"
+    bet_amount: "sum(cht.total_bet_amount_base)"
     bet_amount_base: "sum(cht.total_bet_amount_base)"
     bet_count: "sum(cht.bet_count)"
-    bonus_bet_amount: "sum(cht.total_bet_amount_bonus)"
+    bonus_bet_amount: "sum(cht.total_bet_amount_bonus_base)"
     bonus_bet_count: "sum(cht.bet_bonus_count)"
-    result_amount: "sum(cht.total_result_amount)"
+    result_amount: "sum(cht.total_result_amount_base)"
     result_amount_base: "sum(cht.total_result_amount_base)"
-    bonus_result_amount: "sum(cht.total_bonus_result_amount)"
-    ggr: "sum(cht.total_bet_amount) - sum(cht.total_result_amount)"
+    bonus_result_amount: "sum(cht.total_bonus_result_amount_base)"
+    ggr: "sum(cht.total_bet_amount_base) - sum(cht.total_result_amount_base)"
     players_count: "uniqExact(cht.client_id)"
   cdbt:
-    bet_amount: "sum(cdbt.total_bet_amount)"
+    bet_amount: "sum(cdbt.total_bet_amount_base)"
     bet_amount_base: "sum(cdbt.total_bet_amount_base)"
     bet_count: "sum(cdbt.bet_count)"
-    bonus_bet_amount: "sum(cdbt.total_bet_amount_bonus)"
+    bonus_bet_amount: "sum(cdbt.total_bet_amount_bonus_base)"
     bonus_bet_count: "sum(cdbt.bet_bonus_count)"
-    result_amount: "sum(cdbt.total_result_amount)"
+    result_amount: "sum(cdbt.total_result_amount_base)"
     result_amount_base: "sum(cdbt.total_result_amount_base)"
-    bonus_result_amount: "sum(cdbt.total_bonus_result_amount)"
-    ggr: "sum(cdbt.total_bet_amount) - sum(cdbt.total_result_amount)"
+    bonus_result_amount: "sum(cdbt.total_bonus_result_amount_base)"
+    ggr: "sum(cdbt.total_bet_amount_base) - sum(cdbt.total_result_amount_base)"
     players_count: "uniqExact(cdbt.client_id)"
   chbt:
-    bet_amount: "sum(chbt.total_bet_amount)"
+    bet_amount: "sum(chbt.total_bet_amount_base)"
     bet_amount_base: "sum(chbt.total_bet_amount_base)"
     bet_count: "sum(chbt.bet_count)"
-    bonus_bet_amount: "sum(chbt.total_bet_amount_bonus)"
+    bonus_bet_amount: "sum(chbt.total_bet_amount_bonus_base)"
     bonus_bet_count: "sum(chbt.bet_bonus_count)"
-    result_amount: "sum(chbt.total_result_amount)"
+    result_amount: "sum(chbt.total_result_amount_base)"
     result_amount_base: "sum(chbt.total_result_amount_base)"
-    bonus_result_amount: "sum(chbt.total_bonus_result_amount)"
-    ggr: "sum(chbt.total_bet_amount) - sum(chbt.total_result_amount)"
+    bonus_result_amount: "sum(chbt.total_bonus_result_amount_base)"
+    ggr: "sum(chbt.total_bet_amount_base) - sum(chbt.total_result_amount_base)"
     players_count: "uniqExact(chbt.client_id)"
   cp:
-    deposits_amount: "sum(cp.amount)"
+    deposits_amount: "sum(cp.base_amount)"
     deposits_amount_base: "sum(cp.base_amount)"
     deposits_count: "count()"
-    withdraw_amount: "sum(cp.amount)"
+    withdraw_amount: "sum(cp.base_amount)"
     withdraw_amount_base: "sum(cp.base_amount)"
     withdraw_count: "count()"
     depositing_players_count: "uniqExact(cp.client_id)"
     withdrawing_players_count: "uniqExact(cp.client_id)"
     players_count: "uniqExact(cp.client_id)"
-    deposits_filters: ["cp.status = 5", "cp.payment_type = 'Deposit'"]
-    withdraws_filters: ["cp.status = 5", "cp.payment_type = 'Withdraw'"]
+    deposits_filters: ["cp.status = 5", "cp.payment_type = 'deposit'"]
+    withdraws_filters: ["cp.status = 5", "cp.payment_type = 'withdraw'"]
   cb:
-    bet_amount: "sum(cb.amount)"
+    bet_amount: "sum(cb.base_amount)"
     bet_amount_base: "sum(cb.base_amount)"
     bet_count: "count()"
-    result_amount: "sum(cb.amount)"
+    result_amount: "sum(cb.base_amount)"
     result_amount_base: "sum(cb.base_amount)"
     betting_players_count: "uniqExact(cb.client_id)"
     result_players_count: "uniqExact(cb.client_id)"
@@ -612,6 +621,22 @@ DATE_PRESETS:
     date_start: "addMonths(toStartOfMonth(today()), -1)"
     date_end: "toStartOfMonth(today())"
 
+
+CURRENCY_MODE:
+  default_mode: base
+  phase: 1
+  rules:
+    - "Use *_base and base_amount columns for all monetary outputs by default."
+    - "Use original amount columns only when the prompt explicitly requests currency, by-currency output, or client-currency output."
+    - "If currency output is explicitly requested, include currency in SELECT and GROUP BY where aggregation is used."
+
+PROMPT_OUTPUT_HINTS:
+  if_prompt_mentions_currency:
+    include_dimension: currency
+    use_original_amount_columns: true
+  otherwise:
+    use_base_amount_columns: true
+
 DEFAULT_INTERPRETATIONS:
   top_players:
     default_metric: bet_amount
@@ -634,6 +659,15 @@ COUNT_SYNONYMS:
   - qty
   - quantity
   - total number
+
+
+ENUM_VALUES:
+  payment_type:
+    deposit: "deposit"
+    withdraw: "withdraw"
+  operation:
+    bet: "bet"
+    result: "result"
 
 SEMANTIC_ALIASES:
   deposit: [deposit, deposits, deposited]
