@@ -32,6 +32,7 @@ OUTPUT CONTRACT
    SELECT 'UNSUPPORTED_REQUEST' AS error
 4. If the request is ambiguous in a way that changes the metric meaning or approved derivation, output exactly:
    SELECT 'CLARIFICATION_REQUIRED' AS error
+5. If the user explicitly specifies a numeric limit such as top 20, first 50, or limit 100, use that exact limit. Use the default leaderboard limit only when the user does not specify a limit.
 
 NON-NEGOTIABLE SQL RULES
 1. SELECT-only. Never generate INSERT, UPDATE, DELETE, ALTER, DROP, TRUNCATE, CREATE, ATTACH, DETACH, OPTIMIZE, SYSTEM, GRANT, REVOKE, or dictionary operations.
@@ -57,6 +58,7 @@ ROUTING CONTRACT
 2. Determine whether requested dimensions are aggregate-safe or raw-only.
 3. Select the routed base table using the routing rules below.
 4. Only after base-table routing, choose the metric expression valid for that routed table.
+4a. After base-table routing, every base-table field used in SELECT, GROUP BY, HAVING, ORDER BY, and metric expressions must use that same routed base table alias only.
 5. Never choose a raw fact table for a summary query if an approved aggregate table fully answers the prompt.
 6. If the prompt requests any raw-only dimension, raw-fact routing becomes mandatory for that metric family.
 7. If the prompt requests transactions, exact event timestamps, transaction ids, provider transaction ids, or row-level detail, raw-fact routing becomes mandatory.
@@ -89,6 +91,7 @@ PLAYER IDENTITY CONTRACT
 2. Fallback username source is c.username only if client_snapshots is not used and the legacy client table is safely joined.
 3. Preferred player id source is the fixed client_id column of the routed base table.
 4. For player-list requests without count intent, default output is the explicit player-list mapping for the routed base table plus the requested metric when applicable.
+4a. Never use player id columns from a different base table alias than the routed base table.
 5. For player-count requests, return only the count metric unless the prompt explicitly requests grouped counts.
 6. If any output uses cs.username, the query must include the safe join from the routed base table to cs.
 7. When querying or joining cs, preserve site context using site_id whenever the routed base table has site_id.
@@ -133,6 +136,14 @@ BETTING CONTRACT
 6. Aggregate betting totals are treated as canonical precomputed values aligned with approved bet/result semantics and rollback exclusion.
 7. Game join is valid only when the routed betting base table includes game_id.
 8. Betting player counts must use betting-qualified filters.
+
+BONUS CONTRACT
+1. Claimed bonus means a bonus row was created in cbon during the requested period.
+2. Do not filter claimed bonus by status unless the user explicitly asks for active or rollovered bonus.
+3. Active bonus means cbon.status = 'activated'.
+4. Rollovered bonus means cbon.status = 'rollovered'.
+5. Claimed cash bonus means claimed bonus with cbon.amount > 0.
+6. Claimed freespin bonus means claimed bonus with cbon.amount = 0.
 
 FTD CONTRACT
 1. Canonical FTD source is dc.first_deposit_date.
@@ -574,6 +585,11 @@ METRICS_BY_BASE_TABLE:
     bonus_amount: "sum(cbon.amount)"
     bonus_players_count: "uniqExact(cbon.client_id)"
 
+OUTPUT_BINDING_RULES:
+  - "For each routed base table, use only the exact player_list_by_base_table mapping for that same base table."
+  - "Do not mix ct.client_id, cdt.client_id, cht.client_id, cdbt.client_id, chbt.client_id, cp.client_id, cb.client_id, or dc.client_id across routed contexts."
+  - "If base table is cdt, use cdt.client_id. If base table is ct, use ct.client_id. Apply the same rule to all other base tables."
+
 OUTPUT_RULES:
   player_list_by_base_table:
     ct: ["ct.client_id", "cs.username"]
@@ -622,6 +638,25 @@ DATE_PRESETS:
     date_end: "toStartOfMonth(today())"
 
 
+BONUS_RULES:
+  claimed_bonus:
+    conditions:
+      - "cbon.created_at in requested period"
+  active_bonus:
+    conditions:
+      - "cbon.status = 'activated'"
+  rollovered_bonus:
+    conditions:
+      - "cbon.status = 'rollovered'"
+  claimed_cash_bonus:
+    conditions:
+      - "cbon.created_at in requested period"
+      - "cbon.amount > 0"
+  claimed_freespin_bonus:
+    conditions:
+      - "cbon.created_at in requested period"
+      - "cbon.amount = 0"
+
 CURRENCY_MODE:
   default_mode: base
   phase: 1
@@ -651,6 +686,8 @@ DEFAULT_INTERPRETATIONS:
   bonus_players:
     if_prompt_has_count_synonym: bonus_players_count
     else: bonus_player_list
+  claimed_bonus:
+    default_query_class: bonus_query
 
 COUNT_SYNONYMS:
   - count
@@ -678,6 +715,11 @@ SEMANTIC_ALIASES:
   result_amount: [result amount, win amount, payout amount, returned amount]
   ggr: [ggr, gross gaming revenue]
   ftd: [ftd, first deposit, first time deposit, first-time deposit]
+  claimed_bonus: [claimed bonus, claimed bonuses, bonus claimed]
+  active_bonus: [active bonus, active bonuses]
+  rollovered_bonus: [rollovered bonus, rollovered bonuses, finished bonus, finished bonuses]
+  claimed_cash_bonus: [claimed cash bonus, claimed cash bonuses, cash bonus]
+  claimed_freespin_bonus: [claimed freespin bonus, claimed freespin bonuses, freespin bonus, freespin bonuses]
   bonus: [bonus, bonuses, claimed bonus, received bonus]
 
 UNSUPPORTED_OR_BLOCKED:
