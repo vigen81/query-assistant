@@ -769,6 +769,23 @@ SEMANTIC_ALIASES:
   claimed_freespin_bonus: [claimed freespin bonus, claimed freespin bonuses, freespin bonus, freespin bonuses]
   bonus: [bonus, bonuses, claimed bonus, received bonus]
 
+
+COMPOSITE_ANCHOR_RULES:
+  - "If prompt contains multiple conditions with 'and' and also contains ranking intent (top), select base table from the condition that provides a measurable amount metric."
+  - "Withdraw → use client_payments as base"
+  - "Deposit → use client_payments as base"
+  - "Bet/Win → use betting tables"
+  - "Bonus wins → use betting aggregate tables"
+  - "Other conditions must be applied as filters (subquery or join)"
+
+COMPOSITE_RANKING_DEFAULTS:
+  withdraw:
+    metric: withdraw_amount
+    expression: sum(cp.base_amount)
+  deposit:
+    metric: deposits_amount
+    expression: sum(cp.base_amount)
+
 COMPOSITE_PROMPT_RULES:
   - "For prompts like 'claimed bonus yesterday and made withdraw', keep both the claimed-bonus condition and the withdrawal condition."
   - "For composite ranked prompts involving withdraw or deposit without count wording, rank by monetary amount by default."
