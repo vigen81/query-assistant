@@ -62,6 +62,14 @@ ROUTING CONTRACT
 5. Never choose a raw fact table for a summary query if an approved aggregate table fully answers the prompt.
 6. If the prompt requests any raw-only dimension, raw-fact routing becomes mandatory for that metric family.
 7. If the prompt requests transactions, exact event timestamps, transaction ids, provider transaction ids, or row-level detail, raw-fact routing becomes mandatory.
+8. If the prompt contains an explicit day or date range such as today, yesterday, last 7 days, last 30 days, this month, or last month, lifetime table ct is forbidden.
+9. For betting-only leaderboards and grouped betting summaries:
+   - prefer cdbt for daily or date-range queries
+   - prefer chbt for hourly or intraday queries
+   - use ct only for all-time summaries at dimensions compatible with ct.
+10. If the prompt includes multiple conditions joined by words such as "and", all conditions must be represented in the final query unless the query is returned as CLARIFICATION_REQUIRED.
+11. For "top" or ranked queries, never order by identifier fields such as client_id unless the prompt explicitly asks for id ordering. Use a metric-based ordering.
+12. For prompts mentioning deposit, withdraw, bet, win, result, or bonus result without count wording, default ranked metric is amount, not count.
 
 TIME CONTRACT
 1. Use the routed table's declared primary_time_column.
@@ -96,6 +104,7 @@ PLAYER IDENTITY CONTRACT
 6. If any output uses cs.username, the query must include the safe join from the routed base table to cs.
 7. When querying or joining cs, preserve site context using site_id whenever the routed base table has site_id.
 8. client_snapshots is the default profile source, but it must always be used with site-aware joins.
+9. If the prompt asks for entities who satisfy condition A and condition B, preserve both conditions in the final SQL. Do not drop one side of the conjunction.
 
 CURRENCY CONTRACT
 1. Phase 1 reporting mode is base currency mode.
@@ -124,9 +133,9 @@ BETTING CONTRACT
 1. client_bets.operation canonical values are 'bet' and 'result'.
 2. Core betting KPIs exclude cb.is_rollback = 1.
 3. Betting summary queries must prefer:
-   - ct for lifetime summaries only at dimensions compatible with ct grain or safe regrouping from ct joins
-   - cdbt for daily/date-range betting summary
-   - chbt for hourly/intraday betting summary
+   - ct only for all-time lifetime summaries at dimensions compatible with ct grain or safe regrouping from ct joins
+   - cdbt for daily/date-range betting summary and date-based betting leaderboards
+   - chbt for hourly/intraday betting summary and intraday betting leaderboards
 4. ct is not valid for provider, provider_id, game, game_uuid, product, bet_type, is_bonus, is_free_round, is_fiat, or btag betting summaries.
 5. cb may be used only for:
    - transaction detail
@@ -144,6 +153,8 @@ BONUS CONTRACT
 4. Rollovered bonus means cbon.status = 'rollovered'.
 5. Claimed cash bonus means claimed bonus with cbon.amount > 0.
 6. Claimed freespin bonus means claimed bonus with cbon.amount = 0.
+7. "Bonus wins" and "bonus results" mean bonus_result_amount.
+8. If the user asks for "top bonus wins" or "top bonus results" without specifying an entity, default to top players by bonus_result_amount.
 
 FTD CONTRACT
 1. Canonical FTD source is dc.first_deposit_date.
@@ -174,6 +185,7 @@ BASE_TABLES:
     username_join_target: cs
     primary_time_column: null
     default_filters: ["ct.is_test = 0"]
+    forbidden_when_prompt_has_time_range: true
     supported_group_dimensions:
       - client_id
       - username
@@ -445,6 +457,21 @@ ROUTING_RULES:
   betting_transaction_detail:
     base_table: cb
 
+  top_players_betting_all_time:
+    base_table: ct
+    allowed_dimensions: [client_id, username, currency, country_code, gender]
+  top_players_betting_daily_or_date_range:
+    base_table: cdbt
+  top_players_betting_hourly_or_intraday:
+    base_table: chbt
+  top_bonus_result_all_time:
+    base_table: ct
+    allowed_dimensions: [client_id, username, currency, country_code, gender]
+  top_bonus_result_daily_or_date_range:
+    base_table: cdbt
+  top_bonus_result_hourly_or_intraday:
+    base_table: chbt
+
   ftd_query:
     base_table: dc
   profile_query:
@@ -672,11 +699,31 @@ PROMPT_OUTPUT_HINTS:
   otherwise:
     use_base_amount_columns: true
 
+RANKING_DEFAULTS:
+  deposit:
+    default_rank_metric: deposits_amount
+  withdraw:
+    default_rank_metric: withdraw_amount
+  bet:
+    default_rank_metric: bet_amount
+  win:
+    default_rank_metric: result_amount
+  result:
+    default_rank_metric: result_amount
+  bonus_win:
+    default_rank_metric: bonus_result_amount
+  bonus_result:
+    default_rank_metric: bonus_result_amount
+
 DEFAULT_INTERPRETATIONS:
   top_players:
     default_metric: bet_amount
     default_output: player_list
     default_query_class: leaderboard
+    routing_preference:
+      all_time: ct
+      date_range_or_daily: cdbt
+      hourly_or_intraday: chbt
   players:
     if_prompt_has_count_synonym: players_count
     else: player_list
@@ -721,6 +768,10 @@ SEMANTIC_ALIASES:
   claimed_cash_bonus: [claimed cash bonus, claimed cash bonuses, cash bonus]
   claimed_freespin_bonus: [claimed freespin bonus, claimed freespin bonuses, freespin bonus, freespin bonuses]
   bonus: [bonus, bonuses, claimed bonus, received bonus]
+
+COMPOSITE_PROMPT_RULES:
+  - "For prompts like 'claimed bonus yesterday and made withdraw', keep both the claimed-bonus condition and the withdrawal condition."
+  - "For composite ranked prompts involving withdraw or deposit without count wording, rank by monetary amount by default."
 
 UNSUPPORTED_OR_BLOCKED:
   - "Do not infer refund semantics beyond approved bet/result operation values."
