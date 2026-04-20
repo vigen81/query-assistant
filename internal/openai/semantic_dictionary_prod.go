@@ -12,7 +12,7 @@ package openai
 //
 // CONFIRMED BUSINESS RULES
 // - client_payments.status = 5 means success
-// - client_payments.payment_type values = deposit / withdraw
+// - client_payments.payment_type values = deposite / payout
 // - client_bets.operation canonical values = bet / result
 // - client_payments.is_correction is INCLUDED in payment metrics
 // - FTD canonical source is dim_clients.first_deposit_date
@@ -115,7 +115,7 @@ CURRENCY CONTRACT
 
 PAYMENT CONTRACT
 1. Successful payment means cp.status = 5.
-2. payment_type canonical values are 'deposit' and 'withdraw'.
+2. payment_type canonical DB values are 'deposite' and 'payout'. User-facing withdraw/cashout/payout language must map to 'payout'.
 3. Payment summary queries must prefer:
    - ct for lifetime summary
    - cdt for daily/date-range summary
@@ -128,6 +128,7 @@ PAYMENT CONTRACT
 6. cp.is_correction rows are included in approved payment metrics.
 7. Depositing player counts must use payment-qualified filters.
 8. Withdrawing player counts must use payment-qualified filters.
+9. User-facing deposit language maps to cp.payment_type = 'deposite'. User-facing withdraw/cashout/payout language maps to cp.payment_type = 'payout'.
 
 BETTING CONTRACT
 1. client_bets.operation canonical values are 'bet' and 'result'.
@@ -589,8 +590,8 @@ METRICS_BY_BASE_TABLE:
     depositing_players_count: "uniqExact(cp.client_id)"
     withdrawing_players_count: "uniqExact(cp.client_id)"
     players_count: "uniqExact(cp.client_id)"
-    deposits_filters: ["cp.status = 5", "cp.payment_type = 'deposit'"]
-    withdraws_filters: ["cp.status = 5", "cp.payment_type = 'withdraw'"]
+    deposits_filters: ["cp.status = 5", "cp.payment_type = 'deposite'"]
+    withdraws_filters: ["cp.status = 5", "cp.payment_type = 'payout'"]
   cb:
     bet_amount: "sum(cb.base_amount)"
     bet_amount_base: "sum(cb.base_amount)"
@@ -747,8 +748,11 @@ COUNT_SYNONYMS:
 
 ENUM_VALUES:
   payment_type:
-    deposit: "deposit"
-    withdraw: "withdraw"
+    deposit: "deposite"
+    deposite: "deposite"
+    withdraw: "payout"
+    payout: "payout"
+    cashout: "payout"
   operation:
     bet: "bet"
     result: "result"
@@ -756,6 +760,8 @@ ENUM_VALUES:
 SEMANTIC_ALIASES:
   deposit: [deposit, deposits, deposited]
   withdrawal: [withdraw, withdrawal, withdrawals, cashout, payout]
+  deposit_payment_type: [deposit, deposits, deposited, deposite]
+  withdraw_payment_type: [withdraw, withdrawal, withdrawals, cashout, payout]
   player: [player, players, client, clients, user, users]
   registration: [registration, registrations, registered players, signups, sign ups]
   bet_amount: [bet amount, total bets, wager amount, wagered, stake amount]
@@ -796,4 +802,7 @@ UNSUPPORTED_OR_BLOCKED:
   - "Do not use legacy MySQL epoch timestamps as primary reporting time fields when a native reporting table exists."
   - "Do not create cross-fact metrics unless explicitly defined."
   - "Do not answer FTD amount without an approved derivation rule."
+backend should skip site_id enforcement/injection for sentinel SQL:
+SELECT 'UNSUPPORTED_REQUEST' AS error
+SELECT 'CLARIFICATION_REQUIRED' AS error
 `
