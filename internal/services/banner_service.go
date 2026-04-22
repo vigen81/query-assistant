@@ -63,8 +63,7 @@ func (s *BannerService) Generate(ctx context.Context, req *models.BannerGenerati
 		req.Language = "en"
 	}
 
-	// Build prompt synchronously so we fail fast on template errors.
-	prompt, err := s.promptBuilder.Build(req.Language, imagegen.PromptParams{
+	params := imagegen.PromptParams{
 		Width:               req.Output.Width,
 		Height:              req.Output.Height,
 		Headline:            req.Inputs.Headline,
@@ -72,7 +71,10 @@ func (s *BannerService) Generate(ctx context.Context, req *models.BannerGenerati
 		CTAText:             req.Inputs.CTAText,
 		VisualStyle:         req.Inputs.VisualStyle,
 		CreativeDescription: req.Inputs.CreativeDescription,
-	})
+	}
+
+	// Build prompt synchronously so we fail fast on template errors.
+	prompt, err := s.promptBuilder.Build(req.Language, params)
 	if err != nil {
 		return nil, fmt.Errorf("prompt build failed: %w", err)
 	}
@@ -93,15 +95,20 @@ func (s *BannerService) Generate(ctx context.Context, req *models.BannerGenerati
 		Height: req.Output.Height,
 	}
 
+	s.logger.WithFields(logrus.Fields{
+		"generation_id":      generationID,
+		"language":           req.Language,
+		"provider":           s.provider.Name(),
+		"variants":           s.variantCount,
+		"has_headline":       req.Inputs.Headline != "",
+		"has_secondary_text": req.Inputs.SecondaryText != "",
+		"has_cta":            req.Inputs.CTAText != "",
+		"has_creative_desc":  req.Inputs.CreativeDescription != "",
+		"visual_style":       req.Inputs.VisualStyle,
+	}).Info("Banner generation accepted")
+
 	// Async fan-out — runs after HTTP response is sent.
 	go s.generateVariants(context.Background(), generationID, genReq)
-
-	s.logger.WithFields(logrus.Fields{
-		"generation_id": generationID,
-		"language":      req.Language,
-		"provider":      s.provider.Name(),
-		"variants":      s.variantCount,
-	}).Info("Banner generation accepted")
 
 	return &models.BannerGenerationAccepted{
 		GenerationID: generationID,
@@ -201,28 +208,49 @@ func (s *BannerService) generateVariants(ctx context.Context, generationID strin
 	}).Info("Banner generation completed")
 }
 
-// validateBannerRequest performs lightweight structural validation.
+// ---------------------------------------------------------------------------
+// Validation
+// ---------------------------------------------------------------------------
+
+// validateBannerRequest validates a BannerGenerationRequest against the
+// following rules:
+//
+// Required fields:
+//   - inputs.visual_style
+//   - output.width  (must be positive)
+//   - output.height (must be positive)
+//
+// Minimum content requirement — at least one of:
+//   - inputs.headline
+//   - inputs.cta_text
+//   - inputs.creative_description
+//
+// Fully optional fields:
+//   - inputs.secondary_text
+//   - output.max_size_kb
+//   - language
 func validateBannerRequest(req *models.BannerGenerationRequest) error {
 	if req == nil {
 		return fmt.Errorf("request is nil")
 	}
-	if req.Inputs.Headline == "" {
-		return fmt.Errorf("inputs.headline is required")
-	}
-	if req.Inputs.SecondaryText == "" {
-		return fmt.Errorf("inputs.secondary_text is required")
-	}
-	if req.Inputs.CTAText == "" {
-		return fmt.Errorf("inputs.cta_text is required")
-	}
+
+	// Required structural fields.
 	if req.Inputs.VisualStyle == "" {
 		return fmt.Errorf("inputs.visual_style is required")
 	}
 	if req.Output.Width <= 0 {
-		return fmt.Errorf("output.width must be positive")
+		return fmt.Errorf("output.width must be a positive integer")
 	}
 	if req.Output.Height <= 0 {
-		return fmt.Errorf("output.height must be positive")
+		return fmt.Errorf("output.height must be a positive integer")
 	}
+
+	// Minimum content requirement: at least one content-driving field.
+	if req.Inputs.Headline == "" && req.Inputs.CTAText == "" && req.Inputs.CreativeDescription == "" {
+		return fmt.Errorf(
+			"at least one content field is required: inputs.headline, inputs.cta_text, or inputs.creative_description",
+		)
+	}
+
 	return nil
 }

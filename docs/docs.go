@@ -21,7 +21,7 @@ const docTemplate = `{
     "paths": {
         "/banner/generate": {
             "post": {
-                "description": "Accepts a banner generation request and returns a generation ID immediately (HTTP 202).\nPoll GET /banner/generate/{id} for status and results.\ngpt-image-1 returns b64_json by default — the URL field may be empty.",
+                "description": "Starts an async AI banner generation job and returns a generation ID immediately (HTTP 202).\nPoll GET /banner/generate/{id} until status is \"completed\" or \"failed\".\n\n## Required fields\n- ` + "`" + `inputs.visual_style` + "`" + ` — visual preset (e.g. \"dark_luxury\", \"neon_sport\")\n- ` + "`" + `output.width` + "`" + `  — canvas width in pixels\n- ` + "`" + `output.height` + "`" + ` — canvas height in pixels\n- At least one of: ` + "`" + `inputs.headline` + "`" + `, ` + "`" + `inputs.cta_text` + "`" + `, ` + "`" + `inputs.creative_description` + "`" + `\n\n## Optional fields\n- ` + "`" + `inputs.secondary_text` + "`" + ` — supporting copy (always optional)\n- ` + "`" + `inputs.headline` + "`" + `        — main promotional text\n- ` + "`" + `inputs.cta_text` + "`" + `        — call-to-action button label\n- ` + "`" + `inputs.creative_description` + "`" + ` — additional artistic direction\n- ` + "`" + `output.max_size_kb` + "`" + `     — maximum file size hint\n- ` + "`" + `language` + "`" + `               — prompt locale, defaults to \"en\"\n\n## Minimum valid requests (examples)\n` + "`" + `` + "`" + `` + "`" + `json\n{ \"inputs\": { \"visual_style\": \"dark_luxury\", \"headline\": \"Claim Your Bonus\" },\n\"output\": { \"width\": 1024, \"height\": 1024 } }\n` + "`" + `` + "`" + `` + "`" + `\n` + "`" + `` + "`" + `` + "`" + `json\n{ \"inputs\": { \"visual_style\": \"neon_sport\", \"cta_text\": \"Play Now\" },\n\"output\": { \"width\": 1200, \"height\": 628 } }\n` + "`" + `` + "`" + `` + "`" + `\n` + "`" + `` + "`" + `` + "`" + `json\n{ \"inputs\": { \"visual_style\": \"gold_premium\",\n\"creative_description\": \"Abstract geometric shapes, dark background\" },\n\"output\": { \"width\": 1024, \"height\": 1024 } }\n` + "`" + `` + "`" + `` + "`" + `\n\n## Image data\ngpt-image-1 returns ` + "`" + `b64_json` + "`" + ` by default. The ` + "`" + `url` + "`" + ` field may be empty.\nUse GET /banner/generate/{id}/variant/{index}/image to render the PNG directly.",
                 "consumes": [
                     "application/json"
                 ],
@@ -67,14 +67,14 @@ const docTemplate = `{
         },
         "/banner/generate/{id}": {
             "get": {
-                "description": "Returns status (in_progress / completed / failed), image variants and failure info.\nVariants contain b64_json (base64 encoded PNG) when using gpt-image-1.",
+                "description": "Returns the current status of a generation job.\n\nPossible status values:\n- ` + "`" + `in_progress` + "`" + ` — generation is running; poll again in a few seconds\n- ` + "`" + `completed` + "`" + `   — all (or partial) variants are ready\n- ` + "`" + `failed` + "`" + `      — all variants failed; see failure_reason\n\nWhen using gpt-image-1, variants contain ` + "`" + `b64_json` + "`" + ` (base64 PNG).\nThe ` + "`" + `url` + "`" + ` field may be empty. Use the /variant/{index}/image endpoint\nto view variants directly in a browser.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "banner"
                 ],
-                "summary": "Get banner generation status",
+                "summary": "Poll banner generation status",
                 "parameters": [
                     {
                         "type": "string",
@@ -108,14 +108,14 @@ const docTemplate = `{
         },
         "/banner/generate/{id}/variant/{index}/image": {
             "get": {
-                "description": "Decodes the b64_json of a variant and serves it as a PNG.",
+                "description": "Decodes the b64_json of a completed variant and serves it as image/png.\nOpen this URL directly in a browser to preview the image.\nIf the variant has a URL (non-gpt-image-1 providers), redirects to that URL instead.",
                 "produces": [
                     "image/png"
                 ],
                 "tags": [
                     "banner"
                 ],
-                "summary": "View banner variant as image",
+                "summary": "View banner variant as PNG",
                 "parameters": [
                     {
                         "type": "string",
@@ -126,7 +126,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "integer",
-                        "description": "Variant index (0-3)",
+                        "description": "Variant index (0-based, up to variant_count-1)",
                         "name": "index",
                         "in": "path",
                         "required": true
@@ -139,8 +139,20 @@ const docTemplate = `{
                             "type": "file"
                         }
                     },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/models.BannerErrorResponse"
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/models.BannerErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/models.BannerErrorResponse"
                         }
@@ -556,7 +568,7 @@ const docTemplate = `{
                 },
                 "message": {
                     "type": "string",
-                    "example": "inputs.headline is required"
+                    "example": "at least one content field is required: headline, cta_text, or creative_description"
                 },
                 "timestamp": {
                     "type": "string",
@@ -585,14 +597,25 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "inputs": {
-                    "$ref": "#/definitions/models.BannerInputs"
+                    "description": "Inputs holds the creative content fields.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/models.BannerInputs"
+                        }
+                    ]
                 },
                 "language": {
+                    "description": "Language controls the prompt template locale. Defaults to \"en\" when omitted.",
                     "type": "string",
                     "example": "en"
                 },
                 "output": {
-                    "$ref": "#/definitions/models.BannerOutputParams"
+                    "description": "Output defines the desired image dimensions and size constraints.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/models.BannerOutputParams"
+                        }
+                    ]
                 }
             }
         },
@@ -631,22 +654,27 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "creative_description": {
+                    "description": "CreativeDescription provides additional artistic direction. Optional.",
                     "type": "string",
                     "example": "Abstract geometric shapes, gold and dark background, premium feel"
                 },
                 "cta_text": {
+                    "description": "CTAText is the call-to-action button label. Optional but strongly recommended.",
                     "type": "string",
                     "example": "Claim Now"
                 },
                 "headline": {
+                    "description": "Headline is the main promotional text. Optional, but recommended for most banners.",
                     "type": "string",
                     "example": "Get 100% Bonus on First Deposit"
                 },
                 "secondary_text": {
+                    "description": "SecondaryText is supporting copy displayed near the headline. Fully optional.",
                     "type": "string",
                     "example": "Up to $500 matched. Terms apply."
                 },
                 "visual_style": {
+                    "description": "VisualStyle is the visual preset applied to the banner. Required.",
                     "type": "string",
                     "example": "dark_luxury"
                 }
@@ -656,14 +684,17 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "height": {
+                    "description": "Height is the output image height in pixels. Required.",
                     "type": "integer",
                     "example": 1024
                 },
                 "max_size_kb": {
+                    "description": "MaxSizeKB is the maximum acceptable file size in kilobytes. Optional.",
                     "type": "integer",
                     "example": 2048
                 },
                 "width": {
+                    "description": "Width is the output image width in pixels. Required.",
                     "type": "integer",
                     "example": 1024
                 }

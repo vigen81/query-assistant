@@ -88,6 +88,17 @@ func (c *Client) GenerateQuery(ctx context.Context, prompt string, siteID int64)
 	// Strip markdown fences if the model wraps output
 	generatedQuery = stripMarkdownFences(generatedQuery)
 
+	// Sentinel responses (UNSUPPORTED_REQUEST / CLARIFICATION_REQUIRED) must
+	// pass through untouched — they have no site_id by design and should never
+	// trigger site_id validation or injection.
+	if isSentinelSQL(generatedQuery) {
+		c.logger.WithFields(logrus.Fields{
+			"sentinel": generatedQuery,
+			"site_id":  siteID,
+		}).Info("LLM returned sentinel response — skipping site_id validation")
+		return generatedQuery, nil
+	}
+
 	// Validate site_id filtering
 	if !c.validateSiteIDPresent(generatedQuery, siteID) {
 		c.logger.WithFields(logrus.Fields{
@@ -135,7 +146,6 @@ func (c *Client) buildSemanticDictionaryMessages(prompt string, siteID int64) []
 	systemPrompt = strings.ReplaceAll(systemPrompt, "{site_id}", fmt.Sprintf("%d", siteID))
 
 	// Combine dictionary + DDL into a single system context to reduce message count
-	// (some models handle fewer, larger messages better than many small ones)
 	var dictionaryContext string
 	if len(ddlSchema) > 0 {
 		dictionaryContext = fmt.Sprintf("%s\n\n---\n\n%s", semanticDictionary, ddlSchema)
@@ -163,6 +173,14 @@ func (c *Client) buildSemanticDictionaryMessages(prompt string, siteID int64) []
 	return messages
 }
 
+// isSentinelSQL returns true when the LLM emitted one of the two approved
+// sentinel responses. Sentinels must never be modified by site_id injection.
+func isSentinelSQL(q string) bool {
+	q = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(q), ";"))
+	return q == "select 'unsupported_request' as error" ||
+		q == "select 'clarification_required' as error"
+}
+
 // stripMarkdownFences removes ```sql ... ``` wrapping if present.
 func stripMarkdownFences(s string) string {
 	s = strings.TrimSpace(s)
@@ -180,7 +198,7 @@ func stripMarkdownFences(s string) string {
 	return s
 }
 
-// ---------- site_id validation & safety (unchanged) ----------
+// ---------- site_id validation & safety ----------
 
 func (c *Client) validateSiteIDPresent(query string, siteID int64) bool {
 	lowerQuery := strings.ToLower(query)

@@ -9,7 +9,7 @@ definitions:
         example: Banner generation request failed
         type: string
       message:
-        example: inputs.headline is required
+        example: 'at least one content field is required: headline, cta_text, or creative_description'
         type: string
       timestamp:
         example: "2024-01-01T00:00:00Z"
@@ -30,12 +30,18 @@ definitions:
   models.BannerGenerationRequest:
     properties:
       inputs:
-        $ref: '#/definitions/models.BannerInputs'
+        allOf:
+        - $ref: '#/definitions/models.BannerInputs'
+        description: Inputs holds the creative content fields.
       language:
+        description: Language controls the prompt template locale. Defaults to "en"
+          when omitted.
         example: en
         type: string
       output:
-        $ref: '#/definitions/models.BannerOutputParams'
+        allOf:
+        - $ref: '#/definitions/models.BannerOutputParams'
+        description: Output defines the desired image dimensions and size constraints.
     type: object
   models.BannerGenerationResult:
     properties:
@@ -62,30 +68,41 @@ definitions:
   models.BannerInputs:
     properties:
       creative_description:
+        description: CreativeDescription provides additional artistic direction. Optional.
         example: Abstract geometric shapes, gold and dark background, premium feel
         type: string
       cta_text:
+        description: CTAText is the call-to-action button label. Optional but strongly
+          recommended.
         example: Claim Now
         type: string
       headline:
+        description: Headline is the main promotional text. Optional, but recommended
+          for most banners.
         example: Get 100% Bonus on First Deposit
         type: string
       secondary_text:
+        description: SecondaryText is supporting copy displayed near the headline.
+          Fully optional.
         example: Up to $500 matched. Terms apply.
         type: string
       visual_style:
+        description: VisualStyle is the visual preset applied to the banner. Required.
         example: dark_luxury
         type: string
     type: object
   models.BannerOutputParams:
     properties:
       height:
+        description: Height is the output image height in pixels. Required.
         example: 1024
         type: integer
       max_size_kb:
+        description: MaxSizeKB is the maximum acceptable file size in kilobytes. Optional.
         example: 2048
         type: integer
       width:
+        description: Width is the output image width in pixels. Required.
         example: 1024
         type: integer
     type: object
@@ -545,9 +562,41 @@ paths:
       consumes:
       - application/json
       description: |-
-        Accepts a banner generation request and returns a generation ID immediately (HTTP 202).
-        Poll GET /banner/generate/{id} for status and results.
-        gpt-image-1 returns b64_json by default — the URL field may be empty.
+        Starts an async AI banner generation job and returns a generation ID immediately (HTTP 202).
+        Poll GET /banner/generate/{id} until status is "completed" or "failed".
+
+        ## Required fields
+        - `inputs.visual_style` — visual preset (e.g. "dark_luxury", "neon_sport")
+        - `output.width`  — canvas width in pixels
+        - `output.height` — canvas height in pixels
+        - At least one of: `inputs.headline`, `inputs.cta_text`, `inputs.creative_description`
+
+        ## Optional fields
+        - `inputs.secondary_text` — supporting copy (always optional)
+        - `inputs.headline`        — main promotional text
+        - `inputs.cta_text`        — call-to-action button label
+        - `inputs.creative_description` — additional artistic direction
+        - `output.max_size_kb`     — maximum file size hint
+        - `language`               — prompt locale, defaults to "en"
+
+        ## Minimum valid requests (examples)
+        ```json
+        { "inputs": { "visual_style": "dark_luxury", "headline": "Claim Your Bonus" },
+        "output": { "width": 1024, "height": 1024 } }
+        ```
+        ```json
+        { "inputs": { "visual_style": "neon_sport", "cta_text": "Play Now" },
+        "output": { "width": 1200, "height": 628 } }
+        ```
+        ```json
+        { "inputs": { "visual_style": "gold_premium",
+        "creative_description": "Abstract geometric shapes, dark background" },
+        "output": { "width": 1024, "height": 1024 } }
+        ```
+
+        ## Image data
+        gpt-image-1 returns `b64_json` by default. The `url` field may be empty.
+        Use GET /banner/generate/{id}/variant/{index}/image to render the PNG directly.
       parameters:
       - description: Generation parameters
         in: body
@@ -576,8 +625,16 @@ paths:
   /banner/generate/{id}:
     get:
       description: |-
-        Returns status (in_progress / completed / failed), image variants and failure info.
-        Variants contain b64_json (base64 encoded PNG) when using gpt-image-1.
+        Returns the current status of a generation job.
+
+        Possible status values:
+        - `in_progress` — generation is running; poll again in a few seconds
+        - `completed`   — all (or partial) variants are ready
+        - `failed`      — all variants failed; see failure_reason
+
+        When using gpt-image-1, variants contain `b64_json` (base64 PNG).
+        The `url` field may be empty. Use the /variant/{index}/image endpoint
+        to view variants directly in a browser.
       parameters:
       - description: Generation ID returned by POST /banner/generate
         in: path
@@ -599,19 +656,22 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/models.BannerErrorResponse'
-      summary: Get banner generation status
+      summary: Poll banner generation status
       tags:
       - banner
   /banner/generate/{id}/variant/{index}/image:
     get:
-      description: Decodes the b64_json of a variant and serves it as a PNG.
+      description: |-
+        Decodes the b64_json of a completed variant and serves it as image/png.
+        Open this URL directly in a browser to preview the image.
+        If the variant has a URL (non-gpt-image-1 providers), redirects to that URL instead.
       parameters:
       - description: Generation ID
         in: path
         name: id
         required: true
         type: string
-      - description: Variant index (0-3)
+      - description: Variant index (0-based, up to variant_count-1)
         in: path
         name: index
         required: true
@@ -623,11 +683,19 @@ paths:
           description: OK
           schema:
             type: file
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.BannerErrorResponse'
         "404":
           description: Not Found
           schema:
             $ref: '#/definitions/models.BannerErrorResponse'
-      summary: View banner variant as image
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.BannerErrorResponse'
+      summary: View banner variant as PNG
       tags:
       - banner
   /health:

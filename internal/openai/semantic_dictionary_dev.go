@@ -1,6 +1,6 @@
 package openai
 
-// semantic_dictionary_prod_final.go
+// semantic_dictionary_dev.go
 //
 // FINAL PRODUCTION CANDIDATE
 // - LLM generates SQL
@@ -655,6 +655,10 @@ DATE_PRESETS:
   last_7_days:
     date_start: "today() - 6"
     date_end: "today() + 1"
+  last_week:
+    note: "Interpreted as the last 7 days ending yesterday inclusive. Alias for last_7_days."
+    date_start: "today() - 7"
+    date_end: "today()"
   last_30_days:
     date_start: "today() - 29"
     date_end: "today() + 1"
@@ -774,6 +778,7 @@ SEMANTIC_ALIASES:
   claimed_cash_bonus: [claimed cash bonus, claimed cash bonuses, cash bonus]
   claimed_freespin_bonus: [claimed freespin bonus, claimed freespin bonuses, freespin bonus, freespin bonuses]
   bonus: [bonus, bonuses, claimed bonus, received bonus]
+  last_week: [last week, previous week, past week, past 7 days]
 
 
 COMPOSITE_ANCHOR_RULES:
@@ -793,8 +798,63 @@ COMPOSITE_RANKING_DEFAULTS:
     expression: sum(cp.base_amount)
 
 COMPOSITE_PROMPT_RULES:
-  - "For prompts like 'claimed bonus yesterday and made withdraw', keep both the claimed-bonus condition and the withdrawal condition."
+  - "For prompts like 'claimed bonus [period] and made withdraw [period]', keep BOTH conditions. This is a fully supported composite query — do NOT return CLARIFICATION_REQUIRED."
   - "For composite ranked prompts involving withdraw or deposit without count wording, rank by monetary amount by default."
+  - "When the prompt references two different fact families (bonus + payment, bonus + bet, etc.), use the monetary/payment family as the anchor base table and apply the secondary condition as an IN subquery filter on client_id."
+
+COMPOSITE_EXAMPLES:
+  bonus_and_withdraw:
+    prompt_variants:
+      - "clients who claimed bonus last week and made withdraw"
+      - "show players that claimed bonus yesterday and withdrew"
+      - "clients who received bonus this month and made a payout"
+    routing: cp
+    approach: "Base table is cp (withdraw is the anchor). Filter cp for successful payouts in the requested period. Filter cp.client_id to only clients who appear in cbon for the bonus period using an IN subquery. Always apply site_id to both the outer query and the subquery."
+    sql_pattern: |
+      SELECT cp.client_id, cs.username
+      FROM prod_archive.client_payments cp
+      LEFT JOIN prod_archive.client_snapshots cs
+        ON cp.site_id = cs.site_id AND cp.client_id = cs.client_id
+      WHERE cp.site_id = {site_id}
+        AND cp.is_test = 0
+        AND cp.status = 5
+        AND cp.payment_type = 'payout'
+        AND cp.settled_at >= toDateTime({withdraw_date_start}) AND cp.settled_at < toDateTime({withdraw_date_end})
+        AND cp.client_id IN (
+          SELECT client_id
+          FROM prod_archive.client_bonuses
+          WHERE site_id = {site_id}
+            AND is_test = 0
+            AND created_at >= toDateTime({bonus_date_start}) AND created_at < toDateTime({bonus_date_end})
+        )
+      GROUP BY cp.client_id, cs.username
+      LIMIT 100
+
+  bonus_and_deposit:
+    prompt_variants:
+      - "clients who claimed bonus last week and made deposit"
+      - "players that received a bonus yesterday and deposited"
+    routing: cp
+    approach: "Base table is cp (deposit is the anchor). Filter cp for successful deposits. Filter cp.client_id via IN subquery on cbon for the bonus period."
+    sql_pattern: |
+      SELECT cp.client_id, cs.username
+      FROM prod_archive.client_payments cp
+      LEFT JOIN prod_archive.client_snapshots cs
+        ON cp.site_id = cs.site_id AND cp.client_id = cs.client_id
+      WHERE cp.site_id = {site_id}
+        AND cp.is_test = 0
+        AND cp.status = 5
+        AND cp.payment_type = 'deposite'
+        AND cp.settled_at >= toDateTime({deposit_date_start}) AND cp.settled_at < toDateTime({deposit_date_end})
+        AND cp.client_id IN (
+          SELECT client_id
+          FROM prod_archive.client_bonuses
+          WHERE site_id = {site_id}
+            AND is_test = 0
+            AND created_at >= toDateTime({bonus_date_start}) AND created_at < toDateTime({bonus_date_end})
+        )
+      GROUP BY cp.client_id, cs.username
+      LIMIT 100
 
 UNSUPPORTED_OR_BLOCKED:
   - "Do not infer refund semantics beyond approved bet/result operation values."
