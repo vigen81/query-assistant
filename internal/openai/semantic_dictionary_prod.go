@@ -1,6 +1,6 @@
 package openai
 
-// semantic_dictionary_prod.go
+// semantic_dictionary_prod_final.go
 //
 // FINAL PRODUCTION CANDIDATE
 // - LLM generates SQL
@@ -64,7 +64,7 @@ ROUTING CONTRACT
 7. If the prompt requests transactions, exact event timestamps, transaction ids, provider transaction ids, or row-level detail, raw-fact routing becomes mandatory.
 8. If the prompt contains an explicit day or date range such as today, yesterday, last 7 days, last 30 days, this month, or last month, lifetime table ct is forbidden.
 9. For betting-only leaderboards and grouped betting summaries:
-   - prefer cdbt for daily or date-range queries
+   - use chbt for daily, date-range, and any explicit-time betting queries
    - prefer chbt for hourly or intraday queries
    - use ct only for all-time summaries at dimensions compatible with ct.
 10. If the prompt includes multiple conditions joined by words such as "and", all conditions must be represented in the final query unless the query is returned as CLARIFICATION_REQUIRED.
@@ -135,7 +135,7 @@ BETTING CONTRACT
 2. Core betting KPIs exclude cb.is_rollback = 1.
 3. Betting summary queries must prefer:
    - ct only for all-time lifetime summaries at dimensions compatible with ct grain or safe regrouping from ct joins
-   - cdbt for daily/date-range betting summary and date-based betting leaderboards
+   - chbt for daily/date-range betting summary and date-based betting leaderboards
    - chbt for hourly/intraday betting summary and intraday betting leaderboards
 4. ct is not valid for provider, provider_id, game, game_uuid, product, bet_type, is_bonus, is_free_round, is_fiat, or btag betting summaries.
 5. cb may be used only for:
@@ -156,6 +156,9 @@ BONUS CONTRACT
 6. Claimed freespin bonus means claimed bonus with cbon.amount = 0.
 7. "Bonus wins" and "bonus results" mean bonus_result_amount.
 8. If the user asks for "top bonus wins" or "top bonus results" without specifying an entity, default to top players by bonus_result_amount.
+
+BETTING DATE-RANGE ROUTING RULE
+For any betting report with an explicit time filter or date range, use client_hourly_bets_totals AS chbt as the canonical aggregate source. This includes today, yesterday, last 7 days, last 30 days, this month, previous month, custom date ranges, daily summaries, hourly summaries, time-of-day filters, betting leaderboards, and bonus-result leaderboards. Do not use client_daily_bets_totals AS cdbt for these betting reports unless explicitly configured as fallback. Do not use client_totals AS ct when any time filter is present. Do not use client_bets AS cb unless raw transaction-level betting details or raw-only betting dimensions are requested.
 
 FTD CONTRACT
 1. Canonical FTD source is dc.first_deposit_date.
@@ -424,6 +427,28 @@ SAFE_JOINS:
     type: LEFT JOIN
     on: ["c.client_info_id = ci.id"]
 
+
+BETTING_DATE_RANGE_ROUTING:
+  canonical_table_for_explicit_time_filter: chbt
+  applies_to:
+    - today
+    - yesterday
+    - last_7_days
+    - last_30_days
+    - this_month
+    - previous_month
+    - custom_date_range
+    - daily_summary
+    - hourly_summary
+    - time_of_day_filter
+    - betting_leaderboard
+    - bonus_result_leaderboard
+  rules:
+    - "For any betting report with an explicit time filter or date range, use client_hourly_bets_totals AS chbt as the canonical aggregate source."
+    - "Do not use client_daily_bets_totals AS cdbt for betting reports unless explicitly configured as fallback."
+    - "Do not use client_totals AS ct when any time filter is present."
+    - "Do not use client_bets AS cb unless raw transaction-level betting details or raw-only betting dimensions are requested."
+
 ROUTING_RULES:
   payment_summary_all_time:
     base_table: ct
@@ -448,7 +473,7 @@ ROUTING_RULES:
     base_table: cb
     allowed_dimensions: [provider_name, provider_id, game_id, game_uuid, game_title, product_id, bet_type, is_bonus, is_free_round, is_fiat, btag]
   betting_summary_by_day:
-    base_table: cdbt
+    base_table: chbt
     raw_fallback: cb
     raw_only_dimensions: [provider_id, game_title, product_id, bet_type, is_bonus, is_free_round, is_fiat, btag, provider_transaction_id]
   betting_summary_by_hour:
@@ -462,14 +487,14 @@ ROUTING_RULES:
     base_table: ct
     allowed_dimensions: [client_id, username, currency, country_code, gender]
   top_players_betting_daily_or_date_range:
-    base_table: cdbt
+    base_table: chbt
   top_players_betting_hourly_or_intraday:
     base_table: chbt
   top_bonus_result_all_time:
     base_table: ct
     allowed_dimensions: [client_id, username, currency, country_code, gender]
   top_bonus_result_daily_or_date_range:
-    base_table: cdbt
+    base_table: chbt
   top_bonus_result_hourly_or_intraday:
     base_table: chbt
 
@@ -645,6 +670,12 @@ GROUPING_AND_CURRENCY_RULES:
   - "For top players from ct/cdt/cht/cdbt/chbt, group by the explicit player_list_by_base_table columns first, then order by metric, then limit."
   - "For country, game, or provider leaderboards, group by requested dimension first, then order by metric, then limit."
 
+
+CLICKHOUSE_SQL_SAFETY_RULES:
+  - "Use ClickHouse LIMIT syntax: LIMIT N. Do not use LIMIT offset, count format."
+  - "Never use toTime() with string literals."
+  - "For time-of-day filtering on DateTime columns, use toHour(column) or full DateTime boundaries."
+
 DATE_PRESETS:
   today:
     date_start: "today()"
@@ -655,10 +686,6 @@ DATE_PRESETS:
   last_7_days:
     date_start: "today() - 6"
     date_end: "today() + 1"
-  last_week:
-    note: "Interpreted as the last 7 days ending yesterday inclusive. Alias for last_7_days."
-    date_start: "today() - 7"
-    date_end: "today()"
   last_30_days:
     date_start: "today() - 29"
     date_end: "today() + 1"
@@ -727,7 +754,7 @@ DEFAULT_INTERPRETATIONS:
     default_query_class: leaderboard
     routing_preference:
       all_time: ct
-      date_range_or_daily: cdbt
+      date_range_or_daily: chbt
       hourly_or_intraday: chbt
   players:
     if_prompt_has_count_synonym: players_count
@@ -779,7 +806,6 @@ SEMANTIC_ALIASES:
   claimed_cash_bonus: [claimed cash bonus, claimed cash bonuses, cash bonus]
   claimed_freespin_bonus: [claimed freespin bonus, claimed freespin bonuses, freespin bonus, freespin bonuses]
   bonus: [bonus, bonuses, claimed bonus, received bonus]
-  last_week: [last week, previous week, past week, past 7 days]
 
 
 COMPOSITE_ANCHOR_RULES:
@@ -799,63 +825,8 @@ COMPOSITE_RANKING_DEFAULTS:
     expression: sum(cp.base_amount)
 
 COMPOSITE_PROMPT_RULES:
-  - "For prompts like 'claimed bonus [period] and made withdraw [period]', keep BOTH conditions. This is a fully supported composite query — do NOT return CLARIFICATION_REQUIRED."
+  - "For prompts like 'claimed bonus yesterday and made withdraw', keep both the claimed-bonus condition and the withdrawal condition."
   - "For composite ranked prompts involving withdraw or deposit without count wording, rank by monetary amount by default."
-  - "When the prompt references two different fact families (bonus + payment, bonus + bet, etc.), use the monetary/payment family as the anchor base table and apply the secondary condition as an IN subquery filter on client_id."
-
-COMPOSITE_EXAMPLES:
-  bonus_and_withdraw:
-    prompt_variants:
-      - "clients who claimed bonus last week and made withdraw"
-      - "show players that claimed bonus yesterday and withdrew"
-      - "clients who received bonus this month and made a payout"
-    routing: cp
-    approach: "Base table is cp (withdraw is the anchor). Filter cp for successful payouts in the requested period. Filter cp.client_id to only clients who appear in cbon for the bonus period using an IN subquery. Always apply site_id to both the outer query and the subquery."
-    sql_pattern: |
-      SELECT cp.client_id, cs.username
-      FROM prod_archive.client_payments cp
-      LEFT JOIN prod_archive.client_snapshots cs
-        ON cp.site_id = cs.site_id AND cp.client_id = cs.client_id
-      WHERE cp.site_id = {site_id}
-        AND cp.is_test = 0
-        AND cp.status = 5
-        AND cp.payment_type = 'payout'
-        AND cp.settled_at >= toDateTime({withdraw_date_start}) AND cp.settled_at < toDateTime({withdraw_date_end})
-        AND cp.client_id IN (
-          SELECT client_id
-          FROM prod_archive.client_bonuses
-          WHERE site_id = {site_id}
-            AND is_test = 0
-            AND created_at >= toDateTime({bonus_date_start}) AND created_at < toDateTime({bonus_date_end})
-        )
-      GROUP BY cp.client_id, cs.username
-      LIMIT 100
-
-  bonus_and_deposit:
-    prompt_variants:
-      - "clients who claimed bonus last week and made deposit"
-      - "players that received a bonus yesterday and deposited"
-    routing: cp
-    approach: "Base table is cp (deposit is the anchor). Filter cp for successful deposits. Filter cp.client_id via IN subquery on cbon for the bonus period."
-    sql_pattern: |
-      SELECT cp.client_id, cs.username
-      FROM prod_archive.client_payments cp
-      LEFT JOIN prod_archive.client_snapshots cs
-        ON cp.site_id = cs.site_id AND cp.client_id = cs.client_id
-      WHERE cp.site_id = {site_id}
-        AND cp.is_test = 0
-        AND cp.status = 5
-        AND cp.payment_type = 'deposit'
-        AND cp.settled_at >= toDateTime({deposit_date_start}) AND cp.settled_at < toDateTime({deposit_date_end})
-        AND cp.client_id IN (
-          SELECT client_id
-          FROM prod_archive.client_bonuses
-          WHERE site_id = {site_id}
-            AND is_test = 0
-            AND created_at >= toDateTime({bonus_date_start}) AND created_at < toDateTime({bonus_date_end})
-        )
-      GROUP BY cp.client_id, cs.username
-      LIMIT 100
 
 UNSUPPORTED_OR_BLOCKED:
   - "Do not infer refund semantics beyond approved bet/result operation values."
