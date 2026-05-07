@@ -1,6 +1,6 @@
 package openai
 
-// semantic_dictionary_prod_final.go
+// semantic_dictionary_prod_complete_currency.go
 //
 // FINAL PRODUCTION CANDIDATE
 // - LLM generates SQL
@@ -105,13 +105,22 @@ PLAYER IDENTITY CONTRACT
 7. When querying or joining cs, preserve site context using site_id whenever the routed base table has site_id.
 8. client_snapshots is the default profile source, but it must always be used with site-aware joins.
 9. If the prompt asks for entities who satisfy condition A and condition B, preserve both conditions in the final SQL. Do not drop one side of the conjunction.
+10. If the report is ranked, compared, filtered, or described by a metric, the output must include that metric column.
+11. Do not return only client_id and username for metric-based reports.
+12. For comparison prompts such as withdrawals greater than deposits, include both compared metrics and a derived difference metric when useful.
+13. For prompts involving made bets, made withdrawals, made deposits, wins, bonus wins, or payout, include the relevant amount metric by default unless the user explicitly asks for count/list only.
+14. If requested-currency mode is active, include currency in SELECT and GROUP BY and use original amount metric expressions.
 
 CURRENCY CONTRACT
-1. Phase 1 reporting mode is base currency mode.
+1. Default reporting mode is base currency mode.
 2. By default, all monetary outputs must use base amount columns only.
-3. Use original amount columns only when the prompt explicitly requests currency, by-currency output, or client-currency output.
-4. If the prompt explicitly requests currency output, include currency in SELECT and GROUP BY where aggregation is used.
-5. Do not mix original amount columns and base amount columns in the same monetary metric.
+3. If the user explicitly requests a specific currency, original currency, by-currency output, or client-currency output, switch to requested-currency mode.
+4. In requested-currency mode, use original amount columns, not base amount columns.
+5. In requested-currency mode, SELECT must include currency.
+6. In requested-currency mode, every aggregated monetary report must GROUP BY currency unless the prompt explicitly filters to one currency.
+7. If the prompt requests a specific currency code such as EUR, USD, AMD, RUB, or USDT, filter by the table currency column using that lowercase value when the column exists.
+8. Do not perform FX conversion in SQL. If conversion from base to a requested currency is required and no stored original-currency amount exists, return SELECT 'UNSUPPORTED_REQUEST' AS error.
+9. Do not mix original amount columns and base amount columns in the same monetary metric.
 
 PAYMENT CONTRACT
 1. Successful payment means cp.status = 5.
@@ -528,6 +537,106 @@ DIMENSION_MAPPINGS:
   session_status:
     expression: "cse.status"
 
+CURRENCY_COLUMNS:
+  ct:
+    currency_column: "ct.currency"
+    base_metrics:
+      deposits_amount: "sum(ct.total_deposit_base)"
+      withdraw_amount: "sum(ct.total_withdraw_base)"
+      bet_amount: "sum(ct.total_bet_amount_base)"
+      result_amount: "sum(ct.total_result_amount_base)"
+      bonus_bet_amount: "sum(ct.total_bet_amount_bonus_base)"
+      bonus_result_amount: "sum(ct.total_bonus_result_amount_base)"
+      ggr: "sum(ct.total_bet_amount_base) - sum(ct.total_result_amount_base)"
+    original_metrics:
+      deposits_amount: "sum(ct.total_deposit)"
+      withdraw_amount: "sum(ct.total_withdraw)"
+      bet_amount: "sum(ct.total_bet_amount)"
+      result_amount: "sum(ct.total_result_amount)"
+      bonus_bet_amount: "sum(ct.total_bet_amount_bonus)"
+      bonus_result_amount: "sum(ct.total_bonus_result_amount)"
+      ggr: "sum(ct.total_bet_amount) - sum(ct.total_result_amount)"
+  cdt:
+    currency_column: "cdt.currency"
+    base_metrics:
+      deposits_amount: "sum(cdt.total_deposit_base)"
+      withdraw_amount: "sum(cdt.total_withdraw_base)"
+      bet_amount: "sum(cdt.total_bet_amount_base)"
+      result_amount: "sum(cdt.total_result_amount_base)"
+      bonus_bet_amount: "sum(cdt.total_bet_amount_bonus_base)"
+      bonus_result_amount: "sum(cdt.total_bonus_result_amount_base)"
+      ggr: "sum(cdt.total_bet_amount_base) - sum(cdt.total_result_amount_base)"
+    original_metrics:
+      deposits_amount: "sum(cdt.total_deposit)"
+      withdraw_amount: "sum(cdt.total_withdraw)"
+      bet_amount: "sum(cdt.total_bet_amount)"
+      result_amount: "sum(cdt.total_result_amount)"
+      bonus_bet_amount: "sum(cdt.total_bet_amount_bonus)"
+      bonus_result_amount: "sum(cdt.total_bonus_result_amount)"
+      ggr: "sum(cdt.total_bet_amount) - sum(cdt.total_result_amount)"
+  cht:
+    currency_column: "cht.currency"
+    base_metrics:
+      deposits_amount: "sum(cht.total_deposit_base)"
+      withdraw_amount: "sum(cht.total_withdraw_base)"
+      bet_amount: "sum(cht.total_bet_amount_base)"
+      result_amount: "sum(cht.total_result_amount_base)"
+      bonus_bet_amount: "sum(cht.total_bet_amount_bonus_base)"
+      bonus_result_amount: "sum(cht.total_bonus_result_amount_base)"
+      ggr: "sum(cht.total_bet_amount_base) - sum(cht.total_result_amount_base)"
+    original_metrics:
+      deposits_amount: "sum(cht.total_deposit)"
+      withdraw_amount: "sum(cht.total_withdraw)"
+      bet_amount: "sum(cht.total_bet_amount)"
+      result_amount: "sum(cht.total_result_amount)"
+      bonus_bet_amount: "sum(cht.total_bet_amount_bonus)"
+      bonus_result_amount: "sum(cht.total_bonus_result_amount)"
+      ggr: "sum(cht.total_bet_amount) - sum(cht.total_result_amount)"
+  chbt:
+    currency_column: "chbt.currency"
+    base_metrics:
+      bet_amount: "sum(chbt.total_bet_amount_base)"
+      result_amount: "sum(chbt.total_result_amount_base)"
+      bonus_bet_amount: "sum(chbt.total_bet_amount_bonus_base)"
+      bonus_result_amount: "sum(chbt.total_bonus_result_amount_base)"
+      ggr: "sum(chbt.total_bet_amount_base) - sum(chbt.total_result_amount_base)"
+    original_metrics:
+      bet_amount: "sum(chbt.total_bet_amount)"
+      result_amount: "sum(chbt.total_result_amount)"
+      bonus_bet_amount: "sum(chbt.total_bet_amount_bonus)"
+      bonus_result_amount: "sum(chbt.total_bonus_result_amount)"
+      ggr: "sum(chbt.total_bet_amount) - sum(chbt.total_result_amount)"
+  cdbt:
+    currency_column: "cdbt.currency"
+    base_metrics:
+      bet_amount: "sum(cdbt.total_bet_amount_base)"
+      result_amount: "sum(cdbt.total_result_amount_base)"
+      bonus_bet_amount: "sum(cdbt.total_bet_amount_bonus_base)"
+      bonus_result_amount: "sum(cdbt.total_bonus_result_amount_base)"
+      ggr: "sum(cdbt.total_bet_amount_base) - sum(cdbt.total_result_amount_base)"
+    original_metrics:
+      bet_amount: "sum(cdbt.total_bet_amount)"
+      result_amount: "sum(cdbt.total_result_amount)"
+      bonus_bet_amount: "sum(cdbt.total_bet_amount_bonus)"
+      bonus_result_amount: "sum(cdbt.total_bonus_result_amount)"
+      ggr: "sum(cdbt.total_bet_amount) - sum(cdbt.total_result_amount)"
+  cp:
+    currency_column: "cp.currency"
+    base_metrics:
+      deposits_amount: "sum(cp.base_amount)"
+      withdraw_amount: "sum(cp.base_amount)"
+    original_metrics:
+      deposits_amount: "sum(cp.amount)"
+      withdraw_amount: "sum(cp.amount)"
+  cb:
+    currency_column: "cb.currency"
+    base_metrics:
+      bet_amount: "sum(cb.base_amount)"
+      result_amount: "sum(cb.base_amount)"
+    original_metrics:
+      bet_amount: "sum(cb.amount)"
+      result_amount: "sum(cb.amount)"
+
 METRICS_BY_BASE_TABLE:
   ct:
     deposits_amount: "sum(ct.total_deposit_base)"
@@ -643,6 +752,18 @@ OUTPUT_BINDING_RULES:
   - "Do not mix ct.client_id, cdt.client_id, cht.client_id, cdbt.client_id, chbt.client_id, cp.client_id, cb.client_id, or dc.client_id across routed contexts."
   - "If base table is cdt, use cdt.client_id. If base table is ct, use ct.client_id. Apply the same rule to all other base tables."
 
+METRIC_OUTPUT_RULES:
+  - "If requested-currency mode is active, SELECT must include the table currency column and metric expressions must come from CURRENCY_COLUMNS.original_metrics."
+  - "For any leaderboard or top/bottom report, SELECT must include the metric used in ORDER BY."
+  - "For any HAVING comparison, SELECT must include all compared metrics."
+  - "For players whose withdrawals are greater than deposits, include withdraw_amount, deposits_amount, and withdrawal_minus_deposit."
+  - "For players who made bets, include bet_amount unless the user explicitly asks only for a list/count."
+  - "For players who made withdrawals or payout, include withdraw_amount unless the user explicitly asks only for a list/count."
+  - "For players who made deposits, include deposits_amount unless the user explicitly asks only for a list/count."
+  - "For top bonus wins or bonus results, include bonus_result_amount."
+  - "For claimed bonus only, player list may include only client_id and username unless amount/type/status is requested."
+  - "Do not order by a metric that is not present in SELECT."
+
 OUTPUT_RULES:
   player_list_by_base_table:
     ct: ["ct.client_id", "cs.username"]
@@ -718,17 +839,34 @@ BONUS_RULES:
 
 CURRENCY_MODE:
   default_mode: base
-  phase: 1
+  requested_currency_mode: supported_without_fx_conversion
+  phase: 2_ready
   rules:
     - "Use *_base and base_amount columns for all monetary outputs by default."
-    - "Use original amount columns only when the prompt explicitly requests currency, by-currency output, or client-currency output."
-    - "If currency output is explicitly requested, include currency in SELECT and GROUP BY where aggregation is used."
+    - "If the prompt explicitly requests currency, original currency, by-currency output, a specific currency code, or client-currency output, use original amount columns."
+    - "If requested-currency mode is active, include currency in SELECT and GROUP BY for aggregated reports unless filtering to one explicit currency."
+    - "If the prompt requests a specific currency code, filter by currency using lowercase code where a currency column exists."
+    - "Do not perform FX conversion in SQL."
+    - "If requested currency requires conversion and no stored original-currency amount exists, return SELECT 'UNSUPPORTED_REQUEST' AS error."
 
 PROMPT_OUTPUT_HINTS:
   if_prompt_mentions_currency:
+    currency_mode: requested_currency
     include_dimension: currency
     use_original_amount_columns: true
+    group_by_currency_when_aggregated: true
+  if_prompt_mentions_specific_currency_code:
+    currency_mode: requested_currency
+    include_dimension: currency
+    use_original_amount_columns: true
+    filter_currency_to_requested_code: true
+  if_prompt_mentions_client_currency:
+    currency_mode: requested_currency
+    include_dimension: currency
+    use_original_amount_columns: true
+    group_by_currency_when_aggregated: true
   otherwise:
+    currency_mode: base
     use_base_amount_columns: true
 
 RANKING_DEFAULTS:
@@ -776,6 +914,15 @@ COUNT_SYNONYMS:
   - quantity
   - total number
 
+
+SUPPORTED_CURRENCY_CODES:
+  - eur
+  - usd
+  - amd
+  - rub
+  - usdt
+  - btc
+  - eth
 
 ENUM_VALUES:
   payment_type:
@@ -827,6 +974,18 @@ COMPOSITE_RANKING_DEFAULTS:
 COMPOSITE_PROMPT_RULES:
   - "For prompts like 'claimed bonus yesterday and made withdraw', keep both the claimed-bonus condition and the withdrawal condition."
   - "For composite ranked prompts involving withdraw or deposit without count wording, rank by monetary amount by default."
+  - "For composite prompts involving made bets, made withdraw/payout, made deposit, wins, or bonus wins, include the corresponding amount metric in SELECT."
+  - "For non-ranked composite prompts, include the relevant event amount metric when one condition is monetary and the user did not explicitly request list-only output."
+
+OUTPUT_EXAMPLES:
+  - prompt: "players whose withdrawals are greater than deposits"
+    required_select: ["client_id", "username", "withdraw_amount", "deposits_amount", "withdrawal_minus_deposit"]
+  - prompt: "players who claimed bonus and made bets yesterday"
+    required_select: ["client_id", "username", "bet_amount"]
+  - prompt: "players who received bonus and made payout"
+    required_select: ["client_id", "username", "withdraw_amount"]
+  - prompt: "top bonus wins yesterday"
+    required_select: ["client_id", "username", "bonus_result_amount"]
 
 UNSUPPORTED_OR_BLOCKED:
   - "Do not infer refund semantics beyond approved bet/result operation values."
