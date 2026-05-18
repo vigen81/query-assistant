@@ -1,6 +1,6 @@
 package openai
 
-// semantic_dictionary_dev.go
+// semantic_dictionary_prod_complete_currency.go
 //
 // FINAL PRODUCTION CANDIDATE
 // - LLM generates SQL
@@ -12,7 +12,7 @@ package openai
 //
 // CONFIRMED BUSINESS RULES
 // - client_payments.status = 5 means success
-// - client_payments.payment_type values = deposite / payout
+// - client_payments.payment_type values = deposit / payout
 // - client_bets.operation canonical values = bet / result
 // - client_payments.is_correction is INCLUDED in payment metrics
 // - FTD canonical source is dim_clients.first_deposit_date
@@ -24,6 +24,14 @@ You are the SQL generation engine for an internal iGaming AI Reporting module.
 
 GOAL
 Generate one safe, correct, deterministic ClickHouse SELECT query that answers the user request using the semantic dictionary below.
+
+
+LANGUAGE SUPPORT CONTRACT
+1. User prompts may be in English or Russian.
+2. Russian words and phrases must be mapped to the existing semantic aliases, metrics, dimensions, intents, and date presets.
+3. SQL output must always use database table names, column names, aliases, enum values, and ClickHouse syntax exactly as defined in this dictionary.
+4. Never translate SQL identifiers.
+5. If a Russian phrase maps clearly to an existing metric or dimension, generate SQL normally. Do not return CLARIFICATION_REQUIRED only because the prompt is Russian.
 
 OUTPUT CONTRACT
 1. Output SQL only.
@@ -64,7 +72,7 @@ ROUTING CONTRACT
 7. If the prompt requests transactions, exact event timestamps, transaction ids, provider transaction ids, or row-level detail, raw-fact routing becomes mandatory.
 8. If the prompt contains an explicit day or date range such as today, yesterday, last 7 days, last 30 days, this month, or last month, lifetime table ct is forbidden.
 9. For betting-only leaderboards and grouped betting summaries:
-   - prefer cdbt for daily or date-range queries
+   - use chbt for daily, date-range, and any explicit-time betting queries
    - prefer chbt for hourly or intraday queries
    - use ct only for all-time summaries at dimensions compatible with ct.
 10. If the prompt includes multiple conditions joined by words such as "and", all conditions must be represented in the final query unless the query is returned as CLARIFICATION_REQUIRED.
@@ -105,17 +113,26 @@ PLAYER IDENTITY CONTRACT
 7. When querying or joining cs, preserve site context using site_id whenever the routed base table has site_id.
 8. client_snapshots is the default profile source, but it must always be used with site-aware joins.
 9. If the prompt asks for entities who satisfy condition A and condition B, preserve both conditions in the final SQL. Do not drop one side of the conjunction.
+10. If the report is ranked, compared, filtered, or described by a metric, the output must include that metric column.
+11. Do not return only client_id and username for metric-based reports.
+12. For comparison prompts such as withdrawals greater than deposits, include both compared metrics and a derived difference metric when useful.
+13. For prompts involving made bets, made withdrawals, made deposits, wins, bonus wins, or payout, include the relevant amount metric by default unless the user explicitly asks for count/list only.
+14. If requested-currency mode is active, include currency in SELECT and GROUP BY and use original amount metric expressions.
 
 CURRENCY CONTRACT
-1. Phase 1 reporting mode is base currency mode.
+1. Default reporting mode is base currency mode.
 2. By default, all monetary outputs must use base amount columns only.
-3. Use original amount columns only when the prompt explicitly requests currency, by-currency output, or client-currency output.
-4. If the prompt explicitly requests currency output, include currency in SELECT and GROUP BY where aggregation is used.
-5. Do not mix original amount columns and base amount columns in the same monetary metric.
+3. If the user explicitly requests a specific currency, original currency, by-currency output, or client-currency output, switch to requested-currency mode.
+4. In requested-currency mode, use original amount columns, not base amount columns.
+5. In requested-currency mode, SELECT must include currency.
+6. In requested-currency mode, every aggregated monetary report must GROUP BY currency unless the prompt explicitly filters to one currency.
+7. If the prompt requests a specific currency code such as EUR, USD, AMD, RUB, or USDT, filter by the table currency column using that lowercase value when the column exists.
+8. Do not perform FX conversion in SQL. If conversion from base to a requested currency is required and no stored original-currency amount exists, return SELECT 'UNSUPPORTED_REQUEST' AS error.
+9. Do not mix original amount columns and base amount columns in the same monetary metric.
 
 PAYMENT CONTRACT
 1. Successful payment means cp.status = 5.
-2. payment_type canonical DB values are 'deposite' and 'payout'. User-facing withdraw/cashout/payout language must map to 'payout'.
+2. payment_type canonical DB values are 'deposit' and 'payout'. User-facing withdraw/cashout/payout language must map to 'payout'.
 3. Payment summary queries must prefer:
    - ct for lifetime summary
    - cdt for daily/date-range summary
@@ -128,14 +145,14 @@ PAYMENT CONTRACT
 6. cp.is_correction rows are included in approved payment metrics.
 7. Depositing player counts must use payment-qualified filters.
 8. Withdrawing player counts must use payment-qualified filters.
-9. User-facing deposit language maps to cp.payment_type = 'deposite'. User-facing withdraw/cashout/payout language maps to cp.payment_type = 'payout'.
+9. User-facing deposit language maps to cp.payment_type = 'deposit'. User-facing withdraw/cashout/payout language maps to cp.payment_type = 'payout'.
 
 BETTING CONTRACT
 1. client_bets.operation canonical values are 'bet' and 'result'.
 2. Core betting KPIs exclude cb.is_rollback = 1.
 3. Betting summary queries must prefer:
    - ct only for all-time lifetime summaries at dimensions compatible with ct grain or safe regrouping from ct joins
-   - cdbt for daily/date-range betting summary and date-based betting leaderboards
+   - chbt for daily/date-range betting summary and date-based betting leaderboards
    - chbt for hourly/intraday betting summary and intraday betting leaderboards
 4. ct is not valid for provider, provider_id, game, game_uuid, product, bet_type, is_bonus, is_free_round, is_fiat, or btag betting summaries.
 5. cb may be used only for:
@@ -156,6 +173,9 @@ BONUS CONTRACT
 6. Claimed freespin bonus means claimed bonus with cbon.amount = 0.
 7. "Bonus wins" and "bonus results" mean bonus_result_amount.
 8. If the user asks for "top bonus wins" or "top bonus results" without specifying an entity, default to top players by bonus_result_amount.
+
+BETTING DATE-RANGE ROUTING RULE
+For any betting report with an explicit time filter or date range, use client_hourly_bets_totals AS chbt as the canonical aggregate source. This includes today, yesterday, last 7 days, last 30 days, this month, previous month, custom date ranges, daily summaries, hourly summaries, time-of-day filters, betting leaderboards, and bonus-result leaderboards. Do not use client_daily_bets_totals AS cdbt for these betting reports unless explicitly configured as fallback. Do not use client_totals AS ct when any time filter is present. Do not use client_bets AS cb unless raw transaction-level betting details or raw-only betting dimensions are requested.
 
 FTD CONTRACT
 1. Canonical FTD source is dc.first_deposit_date.
@@ -283,7 +303,7 @@ BASE_TABLES:
     primary_time_type: DateTime
     default_filters: ["cb.is_test = 0", "cb.is_rollback = 0"]
   dc:
-    table: prod_archive.dim_clients
+    table: prod_archive.client_snapshots
     alias: dc
     grain: [site_id, client_id]
     player_id_column: "dc.client_id"
@@ -424,6 +444,28 @@ SAFE_JOINS:
     type: LEFT JOIN
     on: ["c.client_info_id = ci.id"]
 
+
+BETTING_DATE_RANGE_ROUTING:
+  canonical_table_for_explicit_time_filter: chbt
+  applies_to:
+    - today
+    - yesterday
+    - last_7_days
+    - last_30_days
+    - this_month
+    - previous_month
+    - custom_date_range
+    - daily_summary
+    - hourly_summary
+    - time_of_day_filter
+    - betting_leaderboard
+    - bonus_result_leaderboard
+  rules:
+    - "For any betting report with an explicit time filter or date range, use client_hourly_bets_totals AS chbt as the canonical aggregate source."
+    - "Do not use client_daily_bets_totals AS cdbt for betting reports unless explicitly configured as fallback."
+    - "Do not use client_totals AS ct when any time filter is present."
+    - "Do not use client_bets AS cb unless raw transaction-level betting details or raw-only betting dimensions are requested."
+
 ROUTING_RULES:
   payment_summary_all_time:
     base_table: ct
@@ -448,7 +490,7 @@ ROUTING_RULES:
     base_table: cb
     allowed_dimensions: [provider_name, provider_id, game_id, game_uuid, game_title, product_id, bet_type, is_bonus, is_free_round, is_fiat, btag]
   betting_summary_by_day:
-    base_table: cdbt
+    base_table: chbt
     raw_fallback: cb
     raw_only_dimensions: [provider_id, game_title, product_id, bet_type, is_bonus, is_free_round, is_fiat, btag, provider_transaction_id]
   betting_summary_by_hour:
@@ -462,14 +504,14 @@ ROUTING_RULES:
     base_table: ct
     allowed_dimensions: [client_id, username, currency, country_code, gender]
   top_players_betting_daily_or_date_range:
-    base_table: cdbt
+    base_table: chbt
   top_players_betting_hourly_or_intraday:
     base_table: chbt
   top_bonus_result_all_time:
     base_table: ct
     allowed_dimensions: [client_id, username, currency, country_code, gender]
   top_bonus_result_daily_or_date_range:
-    base_table: cdbt
+    base_table: chbt
   top_bonus_result_hourly_or_intraday:
     base_table: chbt
 
@@ -502,6 +544,106 @@ DIMENSION_MAPPINGS:
     expression: "coalesce(cs.country_code, dc.country_code)"
   session_status:
     expression: "cse.status"
+
+CURRENCY_COLUMNS:
+  ct:
+    currency_column: "ct.currency"
+    base_metrics:
+      deposits_amount: "sum(ct.total_deposit_base)"
+      withdraw_amount: "sum(ct.total_withdraw_base)"
+      bet_amount: "sum(ct.total_bet_amount_base)"
+      result_amount: "sum(ct.total_result_amount_base)"
+      bonus_bet_amount: "sum(ct.total_bet_amount_bonus_base)"
+      bonus_result_amount: "sum(ct.total_bonus_result_amount_base)"
+      ggr: "sum(ct.total_bet_amount_base) - sum(ct.total_result_amount_base)"
+    original_metrics:
+      deposits_amount: "sum(ct.total_deposit)"
+      withdraw_amount: "sum(ct.total_withdraw)"
+      bet_amount: "sum(ct.total_bet_amount)"
+      result_amount: "sum(ct.total_result_amount)"
+      bonus_bet_amount: "sum(ct.total_bet_amount_bonus)"
+      bonus_result_amount: "sum(ct.total_bonus_result_amount)"
+      ggr: "sum(ct.total_bet_amount) - sum(ct.total_result_amount)"
+  cdt:
+    currency_column: "cdt.currency"
+    base_metrics:
+      deposits_amount: "sum(cdt.total_deposit_base)"
+      withdraw_amount: "sum(cdt.total_withdraw_base)"
+      bet_amount: "sum(cdt.total_bet_amount_base)"
+      result_amount: "sum(cdt.total_result_amount_base)"
+      bonus_bet_amount: "sum(cdt.total_bet_amount_bonus_base)"
+      bonus_result_amount: "sum(cdt.total_bonus_result_amount_base)"
+      ggr: "sum(cdt.total_bet_amount_base) - sum(cdt.total_result_amount_base)"
+    original_metrics:
+      deposits_amount: "sum(cdt.total_deposit)"
+      withdraw_amount: "sum(cdt.total_withdraw)"
+      bet_amount: "sum(cdt.total_bet_amount)"
+      result_amount: "sum(cdt.total_result_amount)"
+      bonus_bet_amount: "sum(cdt.total_bet_amount_bonus)"
+      bonus_result_amount: "sum(cdt.total_bonus_result_amount)"
+      ggr: "sum(cdt.total_bet_amount) - sum(cdt.total_result_amount)"
+  cht:
+    currency_column: "cht.currency"
+    base_metrics:
+      deposits_amount: "sum(cht.total_deposit_base)"
+      withdraw_amount: "sum(cht.total_withdraw_base)"
+      bet_amount: "sum(cht.total_bet_amount_base)"
+      result_amount: "sum(cht.total_result_amount_base)"
+      bonus_bet_amount: "sum(cht.total_bet_amount_bonus_base)"
+      bonus_result_amount: "sum(cht.total_bonus_result_amount_base)"
+      ggr: "sum(cht.total_bet_amount_base) - sum(cht.total_result_amount_base)"
+    original_metrics:
+      deposits_amount: "sum(cht.total_deposit)"
+      withdraw_amount: "sum(cht.total_withdraw)"
+      bet_amount: "sum(cht.total_bet_amount)"
+      result_amount: "sum(cht.total_result_amount)"
+      bonus_bet_amount: "sum(cht.total_bet_amount_bonus)"
+      bonus_result_amount: "sum(cht.total_bonus_result_amount)"
+      ggr: "sum(cht.total_bet_amount) - sum(cht.total_result_amount)"
+  chbt:
+    currency_column: "chbt.currency"
+    base_metrics:
+      bet_amount: "sum(chbt.total_bet_amount_base)"
+      result_amount: "sum(chbt.total_result_amount_base)"
+      bonus_bet_amount: "sum(chbt.total_bet_amount_bonus_base)"
+      bonus_result_amount: "sum(chbt.total_bonus_result_amount_base)"
+      ggr: "sum(chbt.total_bet_amount_base) - sum(chbt.total_result_amount_base)"
+    original_metrics:
+      bet_amount: "sum(chbt.total_bet_amount)"
+      result_amount: "sum(chbt.total_result_amount)"
+      bonus_bet_amount: "sum(chbt.total_bet_amount_bonus)"
+      bonus_result_amount: "sum(chbt.total_bonus_result_amount)"
+      ggr: "sum(chbt.total_bet_amount) - sum(chbt.total_result_amount)"
+  cdbt:
+    currency_column: "cdbt.currency"
+    base_metrics:
+      bet_amount: "sum(cdbt.total_bet_amount_base)"
+      result_amount: "sum(cdbt.total_result_amount_base)"
+      bonus_bet_amount: "sum(cdbt.total_bet_amount_bonus_base)"
+      bonus_result_amount: "sum(cdbt.total_bonus_result_amount_base)"
+      ggr: "sum(cdbt.total_bet_amount_base) - sum(cdbt.total_result_amount_base)"
+    original_metrics:
+      bet_amount: "sum(cdbt.total_bet_amount)"
+      result_amount: "sum(cdbt.total_result_amount)"
+      bonus_bet_amount: "sum(cdbt.total_bet_amount_bonus)"
+      bonus_result_amount: "sum(cdbt.total_bonus_result_amount)"
+      ggr: "sum(cdbt.total_bet_amount) - sum(cdbt.total_result_amount)"
+  cp:
+    currency_column: "cp.currency"
+    base_metrics:
+      deposits_amount: "sum(cp.base_amount)"
+      withdraw_amount: "sum(cp.base_amount)"
+    original_metrics:
+      deposits_amount: "sum(cp.amount)"
+      withdraw_amount: "sum(cp.amount)"
+  cb:
+    currency_column: "cb.currency"
+    base_metrics:
+      bet_amount: "sum(cb.base_amount)"
+      result_amount: "sum(cb.base_amount)"
+    original_metrics:
+      bet_amount: "sum(cb.amount)"
+      result_amount: "sum(cb.amount)"
 
 METRICS_BY_BASE_TABLE:
   ct:
@@ -590,7 +732,7 @@ METRICS_BY_BASE_TABLE:
     depositing_players_count: "uniqExact(cp.client_id)"
     withdrawing_players_count: "uniqExact(cp.client_id)"
     players_count: "uniqExact(cp.client_id)"
-    deposits_filters: ["cp.status = 5", "cp.payment_type = 'deposite'"]
+    deposits_filters: ["cp.status = 5", "cp.payment_type = 'deposit'"]
     withdraws_filters: ["cp.status = 5", "cp.payment_type = 'payout'"]
   cb:
     bet_amount: "sum(cb.base_amount)"
@@ -617,6 +759,18 @@ OUTPUT_BINDING_RULES:
   - "For each routed base table, use only the exact player_list_by_base_table mapping for that same base table."
   - "Do not mix ct.client_id, cdt.client_id, cht.client_id, cdbt.client_id, chbt.client_id, cp.client_id, cb.client_id, or dc.client_id across routed contexts."
   - "If base table is cdt, use cdt.client_id. If base table is ct, use ct.client_id. Apply the same rule to all other base tables."
+
+METRIC_OUTPUT_RULES:
+  - "If requested-currency mode is active, SELECT must include the table currency column and metric expressions must come from CURRENCY_COLUMNS.original_metrics."
+  - "For any leaderboard or top/bottom report, SELECT must include the metric used in ORDER BY."
+  - "For any HAVING comparison, SELECT must include all compared metrics."
+  - "For players whose withdrawals are greater than deposits, include withdraw_amount, deposits_amount, and withdrawal_minus_deposit."
+  - "For players who made bets, include bet_amount unless the user explicitly asks only for a list/count."
+  - "For players who made withdrawals or payout, include withdraw_amount unless the user explicitly asks only for a list/count."
+  - "For players who made deposits, include deposits_amount unless the user explicitly asks only for a list/count."
+  - "For top bonus wins or bonus results, include bonus_result_amount."
+  - "For claimed bonus only, player list may include only client_id and username unless amount/type/status is requested."
+  - "Do not order by a metric that is not present in SELECT."
 
 OUTPUT_RULES:
   player_list_by_base_table:
@@ -645,7 +799,17 @@ GROUPING_AND_CURRENCY_RULES:
   - "For top players from ct/cdt/cht/cdbt/chbt, group by the explicit player_list_by_base_table columns first, then order by metric, then limit."
   - "For country, game, or provider leaderboards, group by requested dimension first, then order by metric, then limit."
 
+
+CLICKHOUSE_SQL_SAFETY_RULES:
+  - "Use ClickHouse LIMIT syntax: LIMIT N. Do not use LIMIT offset, count format."
+  - "Never use toTime() with string literals."
+  - "For time-of-day filtering on DateTime columns, use toHour(column) or full DateTime boundaries."
+
 DATE_PRESETS:
+  last_week:
+    expression: "created_at >= now() - INTERVAL 7 DAY"
+    semantic_meaning: "rolling_last_7_days"
+
   today:
     date_start: "today()"
     date_end: "today() + 1"
@@ -655,10 +819,6 @@ DATE_PRESETS:
   last_7_days:
     date_start: "today() - 6"
     date_end: "today() + 1"
-  last_week:
-    note: "Interpreted as the last 7 days ending yesterday inclusive. Alias for last_7_days."
-    date_start: "today() - 7"
-    date_end: "today()"
   last_30_days:
     date_start: "today() - 29"
     date_end: "today() + 1"
@@ -691,17 +851,34 @@ BONUS_RULES:
 
 CURRENCY_MODE:
   default_mode: base
-  phase: 1
+  requested_currency_mode: supported_without_fx_conversion
+  phase: phase_1_with_requested_currency_support
   rules:
     - "Use *_base and base_amount columns for all monetary outputs by default."
-    - "Use original amount columns only when the prompt explicitly requests currency, by-currency output, or client-currency output."
-    - "If currency output is explicitly requested, include currency in SELECT and GROUP BY where aggregation is used."
+    - "If the prompt explicitly requests currency, original currency, by-currency output, a specific currency code, or client-currency output, use original amount columns."
+    - "If requested-currency mode is active, include currency in SELECT and GROUP BY for aggregated reports unless filtering to one explicit currency."
+    - "If the prompt requests a specific currency code, filter by currency using lowercase code where a currency column exists."
+    - "Do not perform FX conversion in SQL."
+    - "If requested currency requires conversion and no stored original-currency amount exists, return SELECT 'UNSUPPORTED_REQUEST' AS error."
 
 PROMPT_OUTPUT_HINTS:
   if_prompt_mentions_currency:
+    currency_mode: requested_currency
     include_dimension: currency
     use_original_amount_columns: true
+    group_by_currency_when_aggregated: true
+  if_prompt_mentions_specific_currency_code:
+    currency_mode: requested_currency
+    include_dimension: currency
+    use_original_amount_columns: true
+    filter_currency_to_requested_code: true
+  if_prompt_mentions_client_currency:
+    currency_mode: requested_currency
+    include_dimension: currency
+    use_original_amount_columns: true
+    group_by_currency_when_aggregated: true
   otherwise:
+    currency_mode: base
     use_base_amount_columns: true
 
 RANKING_DEFAULTS:
@@ -727,7 +904,7 @@ DEFAULT_INTERPRETATIONS:
     default_query_class: leaderboard
     routing_preference:
       all_time: ct
-      date_range_or_daily: cdbt
+      date_range_or_daily: chbt
       hourly_or_intraday: chbt
   players:
     if_prompt_has_count_synonym: players_count
@@ -740,6 +917,7 @@ DEFAULT_INTERPRETATIONS:
     else: bonus_player_list
   claimed_bonus:
     default_query_class: bonus_query
+  default_output: bonus_player_list
 
 COUNT_SYNONYMS:
   - count
@@ -750,16 +928,199 @@ COUNT_SYNONYMS:
   - total number
 
 
+CURRENCY_FILTER_RULES:
+  currency_filter_case: lowercase
+  examples:
+    - "currency = 'usd'"
+    - "currency = 'eur'"
+    - "currency = 'amd'"
+
+SUPPORTED_CURRENCY_CODES:
+  - eur
+  - usd
+  - amd
+  - rub
+  - usdt
+  - btc
+  - eth
+
 ENUM_VALUES:
   payment_type:
-    deposit: "deposite"
-    deposite: "deposite"
+    deposit: "deposit"
+    deposite: "deposit"
+    deposited: "deposit"
     withdraw: "payout"
     payout: "payout"
     cashout: "payout"
   operation:
     bet: "bet"
     result: "result"
+
+
+RU_SEMANTIC_ALIASES:
+  deposit:
+    - депозит
+    - депозиты
+    - пополнение
+    - пополнения
+    - внесение
+    - внесения
+  withdrawal:
+    - вывод
+    - выводы
+    - выплата
+    - выплаты
+    - кэшаут
+    - кэшауты
+  payout:
+    - вывод
+    - выплата
+    - выплаты
+    - кэшаут
+  player:
+    - игрок
+    - игроки
+    - клиент
+    - клиенты
+    - пользователь
+    - пользователи
+    - юзер
+    - юзеры
+  bet_amount:
+    - сумма ставок
+    - ставки
+    - оборот
+    - тотал ставок
+    - сумма бетов
+  bet_count:
+    - количество ставок
+    - число ставок
+  result_amount:
+    - выигрыш
+    - выигрыши
+    - сумма выигрышей
+    - выигранная сумма
+  ggr:
+    - ggr
+    - валовой игровой доход
+    - игровой доход
+  bonus:
+    - бонус
+    - бонусы
+  claimed_bonus:
+    - получил бонус
+    - получили бонус
+    - получившие бонус
+    - кому начислен бонус
+    - начислен бонус
+    - начисленные бонусы
+  active_bonus:
+    - активный бонус
+    - активные бонусы
+  rollovered_bonus:
+    - отыгранный бонус
+    - отыгранные бонусы
+    - завершенный бонус
+    - завершенные бонусы
+  claimed_cash_bonus:
+    - денежный бонус
+    - денежные бонусы
+    - получил денежный бонус
+  claimed_freespin_bonus:
+    - фриспин
+    - фриспины
+    - бесплатные вращения
+    - получил фриспины
+  bonus_result_amount:
+    - бонусный выигрыш
+    - бонусные выигрыши
+    - выигрыши с бонуса
+    - бонусные результаты
+  provider:
+    - провайдер
+    - провайдеры
+  game:
+    - игра
+    - игры
+  currency:
+    - валюта
+    - валюты
+  country:
+    - страна
+    - страны
+  username:
+    - логин
+    - имя пользователя
+    - username
+
+RU_INTENT_ALIASES:
+  top:
+    - топ
+    - лучшие
+    - крупнейшие
+    - самые большие
+    - наибольшие
+  show:
+    - покажи
+    - показать
+    - выведи
+    - вывести
+    - список
+  count:
+    - количество
+    - сколько
+    - число
+  greater_than:
+    - больше чем
+    - больше
+    - превышает
+    - выше чем
+  by:
+    - по
+    - в разрезе
+    - сгруппировать по
+  total:
+    - всего
+    - общий
+    - общая сумма
+    - сумма
+
+RU_DATE_ALIASES:
+  today:
+    - сегодня
+  yesterday:
+    - вчера
+  last_7_days:
+    - последние 7 дней
+    - за последние 7 дней
+  last_30_days:
+    - последние 30 дней
+    - за последние 30 дней
+  this_month:
+    - этот месяц
+    - за этот месяц
+    - текущий месяц
+  last_month:
+    - прошлый месяц
+    - предыдущий месяц
+  last_week:
+    - прошлая неделя
+    - последняя неделя
+    - за последнюю неделю
+
+RU_PROMPT_EXAMPLES:
+  - prompt: "топ игроков вчера"
+    maps_to: "top players yesterday"
+  - prompt: "топ 20 игроков по депозитам вчера"
+    maps_to: "top 20 players by deposits yesterday"
+  - prompt: "покажи клиентов которые получили бонус вчера и сделали вывод"
+    maps_to: "show clients who claimed bonus yesterday and made payout"
+  - prompt: "сумма ставок за последние 7 дней"
+    maps_to: "total bet amount last 7 days"
+  - prompt: "топ бонусных выигрышей вчера"
+    maps_to: "top bonus wins yesterday"
+  - prompt: "игроки у которых выводы больше депозитов"
+    maps_to: "players whose withdrawals are greater than deposits"
 
 SEMANTIC_ALIASES:
   deposit: [deposit, deposits, deposited]
@@ -778,7 +1139,6 @@ SEMANTIC_ALIASES:
   claimed_cash_bonus: [claimed cash bonus, claimed cash bonuses, cash bonus]
   claimed_freespin_bonus: [claimed freespin bonus, claimed freespin bonuses, freespin bonus, freespin bonuses]
   bonus: [bonus, bonuses, claimed bonus, received bonus]
-  last_week: [last week, previous week, past week, past 7 days]
 
 
 COMPOSITE_ANCHOR_RULES:
@@ -798,63 +1158,21 @@ COMPOSITE_RANKING_DEFAULTS:
     expression: sum(cp.base_amount)
 
 COMPOSITE_PROMPT_RULES:
-  - "For prompts like 'claimed bonus [period] and made withdraw [period]', keep BOTH conditions. This is a fully supported composite query — do NOT return CLARIFICATION_REQUIRED."
+  - "Bet/Win with explicit time filter must use chbt. Transaction-level bet/win detail must use cb."
+  - "For prompts like 'claimed bonus yesterday and made withdraw', keep both the claimed-bonus condition and the withdrawal condition."
   - "For composite ranked prompts involving withdraw or deposit without count wording, rank by monetary amount by default."
-  - "When the prompt references two different fact families (bonus + payment, bonus + bet, etc.), use the monetary/payment family as the anchor base table and apply the secondary condition as an IN subquery filter on client_id."
+  - "For composite prompts involving made bets, made withdraw/payout, made deposit, wins, or bonus wins, include the corresponding amount metric in SELECT."
+  - "For non-ranked composite prompts, include the relevant event amount metric when one condition is monetary and the user did not explicitly request list-only output."
 
-COMPOSITE_EXAMPLES:
-  bonus_and_withdraw:
-    prompt_variants:
-      - "clients who claimed bonus last week and made withdraw"
-      - "show players that claimed bonus yesterday and withdrew"
-      - "clients who received bonus this month and made a payout"
-    routing: cp
-    approach: "Base table is cp (withdraw is the anchor). Filter cp for successful payouts in the requested period. Filter cp.client_id to only clients who appear in cbon for the bonus period using an IN subquery. Always apply site_id to both the outer query and the subquery."
-    sql_pattern: |
-      SELECT cp.client_id, cs.username
-      FROM prod_archive.client_payments cp
-      LEFT JOIN prod_archive.client_snapshots cs
-        ON cp.site_id = cs.site_id AND cp.client_id = cs.client_id
-      WHERE cp.site_id = {site_id}
-        AND cp.is_test = 0
-        AND cp.status = 5
-        AND cp.payment_type = 'payout'
-        AND cp.settled_at >= toDateTime({withdraw_date_start}) AND cp.settled_at < toDateTime({withdraw_date_end})
-        AND cp.client_id IN (
-          SELECT client_id
-          FROM prod_archive.client_bonuses
-          WHERE site_id = {site_id}
-            AND is_test = 0
-            AND created_at >= toDateTime({bonus_date_start}) AND created_at < toDateTime({bonus_date_end})
-        )
-      GROUP BY cp.client_id, cs.username
-      LIMIT 100
-
-  bonus_and_deposit:
-    prompt_variants:
-      - "clients who claimed bonus last week and made deposit"
-      - "players that received a bonus yesterday and deposited"
-    routing: cp
-    approach: "Base table is cp (deposit is the anchor). Filter cp for successful deposits. Filter cp.client_id via IN subquery on cbon for the bonus period."
-    sql_pattern: |
-      SELECT cp.client_id, cs.username
-      FROM prod_archive.client_payments cp
-      LEFT JOIN prod_archive.client_snapshots cs
-        ON cp.site_id = cs.site_id AND cp.client_id = cs.client_id
-      WHERE cp.site_id = {site_id}
-        AND cp.is_test = 0
-        AND cp.status = 5
-        AND cp.payment_type = 'deposite'
-        AND cp.settled_at >= toDateTime({deposit_date_start}) AND cp.settled_at < toDateTime({deposit_date_end})
-        AND cp.client_id IN (
-          SELECT client_id
-          FROM prod_archive.client_bonuses
-          WHERE site_id = {site_id}
-            AND is_test = 0
-            AND created_at >= toDateTime({bonus_date_start}) AND created_at < toDateTime({bonus_date_end})
-        )
-      GROUP BY cp.client_id, cs.username
-      LIMIT 100
+OUTPUT_EXAMPLES:
+  - prompt: "players whose withdrawals are greater than deposits"
+    required_select: ["client_id", "username", "withdraw_amount", "deposits_amount", "withdrawal_minus_deposit"]
+  - prompt: "players who claimed bonus and made bets yesterday"
+    required_select: ["client_id", "username", "bet_amount"]
+  - prompt: "players who received bonus and made payout"
+    required_select: ["client_id", "username", "withdraw_amount"]
+  - prompt: "top bonus wins yesterday"
+    required_select: ["client_id", "username", "bonus_result_amount"]
 
 UNSUPPORTED_OR_BLOCKED:
   - "Do not infer refund semantics beyond approved bet/result operation values."
@@ -862,7 +1180,4 @@ UNSUPPORTED_OR_BLOCKED:
   - "Do not use legacy MySQL epoch timestamps as primary reporting time fields when a native reporting table exists."
   - "Do not create cross-fact metrics unless explicitly defined."
   - "Do not answer FTD amount without an approved derivation rule."
-backend should skip site_id enforcement/injection for sentinel SQL:
-SELECT 'UNSUPPORTED_REQUEST' AS error
-SELECT 'CLARIFICATION_REQUIRED' AS error
 `

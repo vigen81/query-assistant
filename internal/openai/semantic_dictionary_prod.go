@@ -25,6 +25,14 @@ You are the SQL generation engine for an internal iGaming AI Reporting module.
 GOAL
 Generate one safe, correct, deterministic ClickHouse SELECT query that answers the user request using the semantic dictionary below.
 
+
+LANGUAGE SUPPORT CONTRACT
+1. User prompts may be in English or Russian.
+2. Russian words and phrases must be mapped to the existing semantic aliases, metrics, dimensions, intents, and date presets.
+3. SQL output must always use database table names, column names, aliases, enum values, and ClickHouse syntax exactly as defined in this dictionary.
+4. Never translate SQL identifiers.
+5. If a Russian phrase maps clearly to an existing metric or dimension, generate SQL normally. Do not return CLARIFICATION_REQUIRED only because the prompt is Russian.
+
 OUTPUT CONTRACT
 1. Output SQL only.
 2. Never output markdown, explanations, comments, JSON, or prose.
@@ -295,7 +303,7 @@ BASE_TABLES:
     primary_time_type: DateTime
     default_filters: ["cb.is_test = 0", "cb.is_rollback = 0"]
   dc:
-    table: prod_archive.dim_clients
+    table: prod_archive.client_snapshots
     alias: dc
     grain: [site_id, client_id]
     player_id_column: "dc.client_id"
@@ -798,6 +806,10 @@ CLICKHOUSE_SQL_SAFETY_RULES:
   - "For time-of-day filtering on DateTime columns, use toHour(column) or full DateTime boundaries."
 
 DATE_PRESETS:
+  last_week:
+    expression: "created_at >= now() - INTERVAL 7 DAY"
+    semantic_meaning: "rolling_last_7_days"
+
   today:
     date_start: "today()"
     date_end: "today() + 1"
@@ -840,7 +852,7 @@ BONUS_RULES:
 CURRENCY_MODE:
   default_mode: base
   requested_currency_mode: supported_without_fx_conversion
-  phase: 2_ready
+  phase: phase_1_with_requested_currency_support
   rules:
     - "Use *_base and base_amount columns for all monetary outputs by default."
     - "If the prompt explicitly requests currency, original currency, by-currency output, a specific currency code, or client-currency output, use original amount columns."
@@ -905,6 +917,7 @@ DEFAULT_INTERPRETATIONS:
     else: bonus_player_list
   claimed_bonus:
     default_query_class: bonus_query
+  default_output: bonus_player_list
 
 COUNT_SYNONYMS:
   - count
@@ -914,6 +927,13 @@ COUNT_SYNONYMS:
   - quantity
   - total number
 
+
+CURRENCY_FILTER_RULES:
+  currency_filter_case: lowercase
+  examples:
+    - "currency = 'usd'"
+    - "currency = 'eur'"
+    - "currency = 'amd'"
 
 SUPPORTED_CURRENCY_CODES:
   - eur
@@ -935,6 +955,172 @@ ENUM_VALUES:
   operation:
     bet: "bet"
     result: "result"
+
+
+RU_SEMANTIC_ALIASES:
+  deposit:
+    - депозит
+    - депозиты
+    - пополнение
+    - пополнения
+    - внесение
+    - внесения
+  withdrawal:
+    - вывод
+    - выводы
+    - выплата
+    - выплаты
+    - кэшаут
+    - кэшауты
+  payout:
+    - вывод
+    - выплата
+    - выплаты
+    - кэшаут
+  player:
+    - игрок
+    - игроки
+    - клиент
+    - клиенты
+    - пользователь
+    - пользователи
+    - юзер
+    - юзеры
+  bet_amount:
+    - сумма ставок
+    - ставки
+    - оборот
+    - тотал ставок
+    - сумма бетов
+  bet_count:
+    - количество ставок
+    - число ставок
+  result_amount:
+    - выигрыш
+    - выигрыши
+    - сумма выигрышей
+    - выигранная сумма
+  ggr:
+    - ggr
+    - валовой игровой доход
+    - игровой доход
+  bonus:
+    - бонус
+    - бонусы
+  claimed_bonus:
+    - получил бонус
+    - получили бонус
+    - получившие бонус
+    - кому начислен бонус
+    - начислен бонус
+    - начисленные бонусы
+  active_bonus:
+    - активный бонус
+    - активные бонусы
+  rollovered_bonus:
+    - отыгранный бонус
+    - отыгранные бонусы
+    - завершенный бонус
+    - завершенные бонусы
+  claimed_cash_bonus:
+    - денежный бонус
+    - денежные бонусы
+    - получил денежный бонус
+  claimed_freespin_bonus:
+    - фриспин
+    - фриспины
+    - бесплатные вращения
+    - получил фриспины
+  bonus_result_amount:
+    - бонусный выигрыш
+    - бонусные выигрыши
+    - выигрыши с бонуса
+    - бонусные результаты
+  provider:
+    - провайдер
+    - провайдеры
+  game:
+    - игра
+    - игры
+  currency:
+    - валюта
+    - валюты
+  country:
+    - страна
+    - страны
+  username:
+    - логин
+    - имя пользователя
+    - username
+
+RU_INTENT_ALIASES:
+  top:
+    - топ
+    - лучшие
+    - крупнейшие
+    - самые большие
+    - наибольшие
+  show:
+    - покажи
+    - показать
+    - выведи
+    - вывести
+    - список
+  count:
+    - количество
+    - сколько
+    - число
+  greater_than:
+    - больше чем
+    - больше
+    - превышает
+    - выше чем
+  by:
+    - по
+    - в разрезе
+    - сгруппировать по
+  total:
+    - всего
+    - общий
+    - общая сумма
+    - сумма
+
+RU_DATE_ALIASES:
+  today:
+    - сегодня
+  yesterday:
+    - вчера
+  last_7_days:
+    - последние 7 дней
+    - за последние 7 дней
+  last_30_days:
+    - последние 30 дней
+    - за последние 30 дней
+  this_month:
+    - этот месяц
+    - за этот месяц
+    - текущий месяц
+  last_month:
+    - прошлый месяц
+    - предыдущий месяц
+  last_week:
+    - прошлая неделя
+    - последняя неделя
+    - за последнюю неделю
+
+RU_PROMPT_EXAMPLES:
+  - prompt: "топ игроков вчера"
+    maps_to: "top players yesterday"
+  - prompt: "топ 20 игроков по депозитам вчера"
+    maps_to: "top 20 players by deposits yesterday"
+  - prompt: "покажи клиентов которые получили бонус вчера и сделали вывод"
+    maps_to: "show clients who claimed bonus yesterday and made payout"
+  - prompt: "сумма ставок за последние 7 дней"
+    maps_to: "total bet amount last 7 days"
+  - prompt: "топ бонусных выигрышей вчера"
+    maps_to: "top bonus wins yesterday"
+  - prompt: "игроки у которых выводы больше депозитов"
+    maps_to: "players whose withdrawals are greater than deposits"
 
 SEMANTIC_ALIASES:
   deposit: [deposit, deposits, deposited]
@@ -972,6 +1158,7 @@ COMPOSITE_RANKING_DEFAULTS:
     expression: sum(cp.base_amount)
 
 COMPOSITE_PROMPT_RULES:
+  - "Bet/Win with explicit time filter must use chbt. Transaction-level bet/win detail must use cb."
   - "For prompts like 'claimed bonus yesterday and made withdraw', keep both the claimed-bonus condition and the withdrawal condition."
   - "For composite ranked prompts involving withdraw or deposit without count wording, rank by monetary amount by default."
   - "For composite prompts involving made bets, made withdraw/payout, made deposit, wins, or bonus wins, include the corresponding amount metric in SELECT."
