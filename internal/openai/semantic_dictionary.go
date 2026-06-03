@@ -10,8 +10,8 @@ import "os"
 // Dev   → system prompt v1.2.x  |  semantic dictionary v1.2.2
 
 const (
-	prodSemanticVersion = "v2.6"
-	devSemanticVersion  = "v2.5"
+	prodSemanticVersion = "v3.1"
+	devSemanticVersion  = "v3.1"
 )
 
 func isProdEnv() bool {

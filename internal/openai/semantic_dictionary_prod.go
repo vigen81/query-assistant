@@ -15,9 +15,9 @@ package openai
 // - client_payments.payment_type values = deposit / payout
 // - client_bets.operation canonical values = bet / result
 // - client_payments.is_correction is INCLUDED in payment metrics
-// - FTD canonical source is dim_clients.first_deposit_date
+// - FTD canonical source is client_payments.is_first = 1 successful deposit
 // - Core betting KPIs exclude is_rollback = 1
-// - Phase 1 currency mode: use base amounts by default
+// - Currency mode: base amounts by default; requested stored currency supported without FX conversion
 
 const prodSystemPrompt = `
 You are the SQL generation engine for an internal iGaming AI Reporting module.
@@ -88,7 +88,7 @@ TIME CONTRACT
 4. Always use half-open ranges.
 5. Never use equality with relative date functions such as = yesterday().
 6. Do not invent a time period unless explicitly allowed by a default interpretation rule.
-7. For FTD queries, the time dimension is always dc.first_deposit_date.
+7. For FTD queries, the time dimension is cp.settled_at on successful first-deposit payment rows.
 8. Never use a generic placeholder time column.
 
 AGGREGATE GRAIN CONTRACT
@@ -173,22 +173,22 @@ BONUS CONTRACT
 6. Claimed freespin bonus means claimed bonus with cbon.amount = 0.
 7. "Bonus wins" and "bonus results" mean bonus_result_amount.
 8. If the user asks for "top bonus wins" or "top bonus results" without specifying an entity, default to top players by bonus_result_amount.
+9. For aggregated active or rollovered bonus amount/count reports with date ranges, use client_daily_bonus AS cdbon.
 
 BETTING DATE-RANGE ROUTING RULE
 For any betting report with an explicit time filter or date range, use client_hourly_bets_totals AS chbt as the canonical aggregate source. This includes today, yesterday, last 7 days, last 30 days, this month, previous month, custom date ranges, daily summaries, hourly summaries, time-of-day filters, betting leaderboards, and bonus-result leaderboards. Do not use client_daily_bets_totals AS cdbt for these betting reports unless explicitly configured as fallback. Do not use client_totals AS ct when any time filter is present. Do not use client_bets AS cb unless raw transaction-level betting details or raw-only betting dimensions are requested.
 
 FTD CONTRACT
-1. Canonical FTD source is dc.first_deposit_date.
-2. FTD count and FTD player-list queries must use dc.
-3. FTD date filters must always apply to dc.first_deposit_date.
-4. FTD amount is not approved in this version. If requested, return:
-   SELECT 'CLARIFICATION_REQUIRED' AS error
+1. Canonical FTD source is client_payments cp where cp.status = 5, cp.payment_type = 'deposit', and cp.is_first = 1.
+2. FTD count, FTD amount, and FTD player-list queries must use cp.
+3. FTD date filters must apply to cp.settled_at.
+4. Do not use dim_clients for FTD because it is not present in the current DDL.
 
 JOIN SAFETY CONTRACT
 1. Preferred player joins use (site_id, client_id).
 2. Never join on client_id alone if site_id exists on both sides.
 3. Game join is valid only for base tables that contain game_id.
-4. Prefer dc and cs over legacy MySQL mirrors for reporting semantics.
+4. Prefer cs over legacy MySQL mirrors for profile and registration semantics. Do not use dim_clients because it is not present in the current DDL.
 5. Legacy tables c and ci are fallback-only and must not be used as default routing targets.
 `
 
@@ -211,7 +211,7 @@ BASE_TABLES:
       - client_id
       - username
       - currency
-      - country_code
+      - country
       - gender
   cdt:
     table: prod_archive.client_daily_totals
@@ -227,7 +227,7 @@ BASE_TABLES:
       - client_id
       - username
       - currency
-      - country_code
+      - country
       - gender
   cht:
     table: prod_archive.client_hourly_totals
@@ -243,7 +243,7 @@ BASE_TABLES:
       - client_id
       - username
       - currency
-      - country_code
+      - country
       - gender
   cdbt:
     table: prod_archive.client_daily_bets_totals
@@ -262,7 +262,7 @@ BASE_TABLES:
       - provider_name
       - game_id
       - game_uuid
-      - country_code
+      - country
       - gender
   chbt:
     table: prod_archive.client_hourly_bets_totals
@@ -281,7 +281,7 @@ BASE_TABLES:
       - provider_name
       - game_id
       - game_uuid
-      - country_code
+      - country
       - gender
   cp:
     table: prod_archive.client_payments
@@ -302,15 +302,6 @@ BASE_TABLES:
     primary_time_column: created_at
     primary_time_type: DateTime
     default_filters: ["cb.is_test = 0", "cb.is_rollback = 0"]
-  dc:
-    table: prod_archive.client_snapshots
-    alias: dc
-    grain: [site_id, client_id]
-    player_id_column: "dc.client_id"
-    username_join_target: cs
-    primary_time_column: first_deposit_date
-    primary_time_type: DateTime
-    default_filters: ["dc.is_test = 0"]
   cs:
     table: prod_archive.client_snapshots
     alias: cs
@@ -327,6 +318,15 @@ BASE_TABLES:
     primary_time_column: created_at
     primary_time_type: DateTime
     default_filters: ["cbon.is_test = 0"]
+  cdbon:
+    table: prod_archive.client_daily_bonus
+    alias: cdbon
+    grain: [day, site_id, client_id, bonus_id, currency]
+    player_id_column: "cdbon.client_id"
+    username_join_target: cs
+    primary_time_column: day
+    primary_time_type: Date
+    default_filters: ["cdbon.is_test = 0"]
 
   ca:
     table: prod_archive.client_activity
@@ -376,10 +376,6 @@ SAFE_JOINS:
     type: LEFT JOIN
     on: ["cb.site_id = cs.site_id", "cb.client_id = cs.client_id"]
   - left: cb
-    right: dc
-    type: LEFT JOIN
-    on: ["cb.site_id = dc.site_id", "cb.client_id = dc.client_id"]
-  - left: cb
     right: g
     type: LEFT JOIN
     on: ["cb.game_id = g.id"]
@@ -387,42 +383,22 @@ SAFE_JOINS:
     right: cs
     type: LEFT JOIN
     on: ["cp.site_id = cs.site_id", "cp.client_id = cs.client_id"]
-  - left: cp
-    right: dc
-    type: LEFT JOIN
-    on: ["cp.site_id = dc.site_id", "cp.client_id = dc.client_id"]
   - left: cdt
     right: cs
     type: LEFT JOIN
     on: ["cdt.site_id = cs.site_id", "cdt.client_id = cs.client_id"]
-  - left: cdt
-    right: dc
-    type: LEFT JOIN
-    on: ["cdt.site_id = dc.site_id", "cdt.client_id = dc.client_id"]
   - left: cht
     right: cs
     type: LEFT JOIN
     on: ["cht.site_id = cs.site_id", "cht.client_id = cs.client_id"]
-  - left: cht
-    right: dc
-    type: LEFT JOIN
-    on: ["cht.site_id = dc.site_id", "cht.client_id = dc.client_id"]
   - left: ct
     right: cs
     type: LEFT JOIN
     on: ["ct.site_id = cs.site_id", "ct.client_id = cs.client_id"]
-  - left: ct
-    right: dc
-    type: LEFT JOIN
-    on: ["ct.site_id = dc.site_id", "ct.client_id = dc.client_id"]
   - left: cdbt
     right: cs
     type: LEFT JOIN
     on: ["cdbt.site_id = cs.site_id", "cdbt.client_id = cs.client_id"]
-  - left: cdbt
-    right: dc
-    type: LEFT JOIN
-    on: ["cdbt.site_id = dc.site_id", "cdbt.client_id = dc.client_id"]
   - left: cdbt
     right: g
     type: LEFT JOIN
@@ -432,13 +408,13 @@ SAFE_JOINS:
     type: LEFT JOIN
     on: ["chbt.site_id = cs.site_id", "chbt.client_id = cs.client_id"]
   - left: chbt
-    right: dc
-    type: LEFT JOIN
-    on: ["chbt.site_id = dc.site_id", "chbt.client_id = dc.client_id"]
-  - left: chbt
     right: g
     type: LEFT JOIN
     on: ["chbt.game_id = g.id"]
+  - left: cdbon
+    right: cs
+    type: LEFT JOIN
+    on: ["cdbon.site_id = cs.site_id", "cdbon.client_id = cs.client_id"]
   - left: c
     right: ci
     type: LEFT JOIN
@@ -485,7 +461,7 @@ ROUTING_RULES:
   betting_summary_all_time_player_or_demographic:
     base_table: ct
     raw_fallback: cb
-    allowed_dimensions: [client_id, username, currency, country_code, gender]
+    allowed_dimensions: [client_id, username, currency, country, gender]
   betting_summary_all_time_provider_or_game:
     base_table: cb
     allowed_dimensions: [provider_name, provider_id, game_id, game_uuid, game_title, product_id, bet_type, is_bonus, is_free_round, is_fiat, btag]
@@ -502,27 +478,29 @@ ROUTING_RULES:
 
   top_players_betting_all_time:
     base_table: ct
-    allowed_dimensions: [client_id, username, currency, country_code, gender]
+    allowed_dimensions: [client_id, username, currency, country, gender]
   top_players_betting_daily_or_date_range:
     base_table: chbt
   top_players_betting_hourly_or_intraday:
     base_table: chbt
   top_bonus_result_all_time:
     base_table: ct
-    allowed_dimensions: [client_id, username, currency, country_code, gender]
+    allowed_dimensions: [client_id, username, currency, country, gender]
   top_bonus_result_daily_or_date_range:
     base_table: chbt
   top_bonus_result_hourly_or_intraday:
     base_table: chbt
 
   ftd_query:
-    base_table: dc
+    base_table: cp
   profile_query:
     base_table: cs
   registration_query:
-    base_table: dc
+    base_table: cs
   bonus_query:
     base_table: cbon
+  bonus_daily_summary:
+    base_table: cdbon
   activity_query:
     base_table: ca
   event_query:
@@ -537,11 +515,11 @@ DIMENSION_MAPPINGS:
   game_title:
     expression: "g.title"
   registration_date:
-    expression: "dc.registration_date"
+    expression: "cs.created_at"
   first_deposit_date:
-    expression: "dc.first_deposit_date"
-  country_code:
-    expression: "coalesce(cs.country_code, dc.country_code)"
+    expression: "cp.settled_at"
+  country:
+    expression: "cs.country"
   session_status:
     expression: "cse.status"
 
@@ -645,6 +623,15 @@ CURRENCY_COLUMNS:
       bet_amount: "sum(cb.amount)"
       result_amount: "sum(cb.amount)"
 
+  cdbon:
+    currency_column: "cdbon.currency"
+    base_metrics:
+      activated_bonus_amount: "sum(cdbon.activated_amount)"
+      rollovered_bonus_amount: "sum(cdbon.rollovered_amount)"
+    original_metrics:
+      activated_bonus_amount: "sum(cdbon.activated_amount)"
+      rollovered_bonus_amount: "sum(cdbon.rollovered_amount)"
+
 METRICS_BY_BASE_TABLE:
   ct:
     deposits_amount: "sum(ct.total_deposit_base)"
@@ -732,7 +719,10 @@ METRICS_BY_BASE_TABLE:
     depositing_players_count: "uniqExact(cp.client_id)"
     withdrawing_players_count: "uniqExact(cp.client_id)"
     players_count: "uniqExact(cp.client_id)"
+    ftd_count: "uniqExact(cp.client_id)"
+    ftd_amount: "sum(cp.base_amount)"
     deposits_filters: ["cp.status = 5", "cp.payment_type = 'deposit'"]
+    ftd_filters: ["cp.status = 5", "cp.payment_type = 'deposit'", "cp.is_first = 1"]
     withdraws_filters: ["cp.status = 5", "cp.payment_type = 'payout'"]
   cb:
     bet_amount: "sum(cb.base_amount)"
@@ -745,20 +735,24 @@ METRICS_BY_BASE_TABLE:
     players_count: "uniqExact(cb.client_id)"
     bets_filters: ["cb.operation = 'bet'"]
     results_filters: ["cb.operation = 'result'"]
-  dc:
-    ftd_count: "uniqExact(dc.client_id)"
-    registrations_count: "uniqExact(dc.client_id)"
-    players_count: "uniqExact(dc.client_id)"
-    ftd_filters: ["dc.first_deposit_date IS NOT NULL"]
-    registrations_filters: ["dc.registration_date IS NOT NULL"]
+  cs:
+    registrations_count: "uniqExact(cs.client_id)"
+    players_count: "uniqExact(cs.client_id)"
+    registrations_filters: ["cs.created_at IS NOT NULL"]
   cbon:
     bonus_amount: "sum(cbon.amount)"
     bonus_players_count: "uniqExact(cbon.client_id)"
+  cdbon:
+    activated_bonus_amount: "sum(cdbon.activated_amount)"
+    activated_bonus_count: "sum(cdbon.activated_count)"
+    rollovered_bonus_amount: "sum(cdbon.rollovered_amount)"
+    rollovered_bonus_count: "sum(cdbon.rollovered_count)"
+    bonus_players_count: "uniqExact(cdbon.client_id)"
 
 OUTPUT_BINDING_RULES:
   - "For each routed base table, use only the exact player_list_by_base_table mapping for that same base table."
-  - "Do not mix ct.client_id, cdt.client_id, cht.client_id, cdbt.client_id, chbt.client_id, cp.client_id, cb.client_id, or dc.client_id across routed contexts."
-  - "If base table is cdt, use cdt.client_id. If base table is ct, use ct.client_id. Apply the same rule to all other base tables."
+  - "Do not mix ct.client_id, cdt.client_id, cht.client_id, cdbt.client_id, chbt.client_id, cp.client_id, cb.client_id, cs.client_id, cbon.client_id, or cdbon.client_id across routed contexts."
+  - "If base table is cdt, use cdt.client_id. If base table is ct, use ct.client_id. If base table is cs, use cs.client_id. Apply the same rule to all other base tables."
 
 METRIC_OUTPUT_RULES:
   - "If requested-currency mode is active, SELECT must include the table currency column and metric expressions must come from CURRENCY_COLUMNS.original_metrics."
@@ -781,15 +775,15 @@ OUTPUT_RULES:
     chbt: ["chbt.client_id", "cs.username"]
     cp: ["cp.client_id", "cs.username"]
     cb: ["cb.client_id", "cs.username"]
-    dc: ["dc.client_id", "cs.username"]
     cbon: ["cbon.client_id", "cs.username"]
+    cdbon: ["cdbon.client_id", "cs.username"]
     ca: ["ca.client_id", "cs.username"]
     ce: ["ce.client_id", "cs.username"]
     cse: ["cse.client_id", "cs.username"]
   ftd_player_list:
-    required_columns: ["dc.client_id", "cs.username", "dc.first_deposit_date"]
+    required_columns: ["cp.client_id", "cs.username", "cp.settled_at"]
   registration_player_list:
-    required_columns: ["dc.client_id", "cs.username", "dc.registration_date"]
+    required_columns: ["cs.client_id", "cs.username", "cs.created_at"]
   bonus_player_list:
     required_columns: ["cbon.client_id", "cs.username"]
 
@@ -806,10 +800,6 @@ CLICKHOUSE_SQL_SAFETY_RULES:
   - "For time-of-day filtering on DateTime columns, use toHour(column) or full DateTime boundaries."
 
 DATE_PRESETS:
-  last_week:
-    expression: "created_at >= now() - INTERVAL 7 DAY"
-    semantic_meaning: "rolling_last_7_days"
-
   today:
     date_start: "today()"
     date_end: "today() + 1"
@@ -917,7 +907,7 @@ DEFAULT_INTERPRETATIONS:
     else: bonus_player_list
   claimed_bonus:
     default_query_class: bonus_query
-  default_output: bonus_player_list
+    default_output: bonus_player_list
 
 COUNT_SYNONYMS:
   - count
@@ -1145,7 +1135,7 @@ COMPOSITE_ANCHOR_RULES:
   - "If prompt contains multiple conditions with 'and' and also contains ranking intent (top), select base table from the condition that provides a measurable amount metric."
   - "Withdraw → use client_payments as base"
   - "Deposit → use client_payments as base"
-  - "Bet/Win → use betting tables"
+  - "Bet/Win with explicit time filter → use chbt; transaction-level bet/win detail → use cb"
   - "Bonus wins → use betting aggregate tables"
   - "Other conditions must be applied as filters (subquery or join)"
 
@@ -1153,12 +1143,29 @@ COMPOSITE_RANKING_DEFAULTS:
   withdraw:
     metric: withdraw_amount
     expression: sum(cp.base_amount)
+  payout:
+    metric: withdraw_amount
+    expression: sum(cp.base_amount)
   deposit:
     metric: deposits_amount
     expression: sum(cp.base_amount)
+  bet:
+    metric: bet_amount
+    expression: sum(chbt.total_bet_amount_base)
+  win:
+    metric: result_amount
+    expression: sum(chbt.total_result_amount_base)
+  result:
+    metric: result_amount
+    expression: sum(chbt.total_result_amount_base)
+  bonus_win:
+    metric: bonus_result_amount
+    expression: sum(chbt.total_bonus_result_amount_base)
+  bonus_result:
+    metric: bonus_result_amount
+    expression: sum(chbt.total_bonus_result_amount_base)
 
 COMPOSITE_PROMPT_RULES:
-  - "Bet/Win with explicit time filter must use chbt. Transaction-level bet/win detail must use cb."
   - "For prompts like 'claimed bonus yesterday and made withdraw', keep both the claimed-bonus condition and the withdrawal condition."
   - "For composite ranked prompts involving withdraw or deposit without count wording, rank by monetary amount by default."
   - "For composite prompts involving made bets, made withdraw/payout, made deposit, wins, or bonus wins, include the corresponding amount metric in SELECT."
