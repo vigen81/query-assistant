@@ -3,10 +3,42 @@ package imagegen
 import (
 	"context"
 	"fmt"
+	"math"
 
 	openai "github.com/sashabaranov/go-openai"
 	"github.com/sirupsen/logrus"
 )
+
+// gptImageBuckets are the only sizes gpt-image-1 accepts.
+var gptImageBuckets = []struct {
+	Width, Height int
+}{
+	{1024, 1024},
+	{1024, 1536},
+	{1536, 1024},
+}
+
+// closestGPTImageSize returns the gpt-image-1 bucket whose aspect ratio is
+// closest to the requested width/height. gpt-image-1 has no arbitrary-size
+// or aspect-ratio parameter, so any caller-supplied size must be snapped to
+// one of its three fixed canvases before the API call.
+func closestGPTImageSize(width, height int) (w, h int) {
+	if width <= 0 || height <= 0 {
+		return 1024, 1024
+	}
+	target := float64(width) / float64(height)
+
+	bestW, bestH := gptImageBuckets[0].Width, gptImageBuckets[0].Height
+	bestDiff := math.MaxFloat64
+	for _, b := range gptImageBuckets {
+		ratio := float64(b.Width) / float64(b.Height)
+		if diff := math.Abs(ratio - target); diff < bestDiff {
+			bestDiff = diff
+			bestW, bestH = b.Width, b.Height
+		}
+	}
+	return bestW, bestH
+}
 
 // OpenAIAdapter implements Provider using OpenAI gpt-image-1.
 type OpenAIAdapter struct {
@@ -33,12 +65,14 @@ func (a *OpenAIAdapter) Name() string { return "openai-gpt-image-1" }
 // gpt-image-1 only supports n=1 per call; callers must fan-out for multiple variants.
 // gpt-image-1 returns b64_json by default (no response_format parameter supported).
 func (a *OpenAIAdapter) Generate(ctx context.Context, req GenerationRequest) (*GeneratedImage, error) {
-	size := fmt.Sprintf("%dx%d", req.Width, req.Height)
+	genW, genH := closestGPTImageSize(req.Width, req.Height)
+	size := fmt.Sprintf("%dx%d", genW, genH)
 
 	a.logger.WithFields(logrus.Fields{
-		"size":  size,
-		"model": "gpt-image-1",
-	}).Debug("Sending gpt-image-1 generation request")
+		"requested_size":  fmt.Sprintf("%dx%d", req.Width, req.Height),
+		"generation_size": size,
+		"model":           "gpt-image-1",
+	}).Debug("Sending gpt-image-1 generation request (snapped to nearest supported bucket)")
 
 	resp, err := a.client.CreateImage(ctx, openai.ImageRequest{
 		Model:  "gpt-image-1",
@@ -62,8 +96,10 @@ func (a *OpenAIAdapter) Generate(ctx context.Context, req GenerationRequest) (*G
 	}).Debug("gpt-image-1 generation succeeded")
 
 	return &GeneratedImage{
-		URL:           resp.Data[0].URL,
-		B64JSON:       resp.Data[0].B64JSON,
-		RevisedPrompt: resp.Data[0].RevisedPrompt,
+		URL:             resp.Data[0].URL,
+		B64JSON:         resp.Data[0].B64JSON,
+		RevisedPrompt:   resp.Data[0].RevisedPrompt,
+		GeneratedWidth:  genW,
+		GeneratedHeight: genH,
 	}, nil
 }

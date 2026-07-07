@@ -16,6 +16,11 @@ type GeneratedImage struct {
 	URL           string
 	B64JSON       string
 	RevisedPrompt string
+	// GeneratedWidth/GeneratedHeight are the actual pixel dimensions the
+	// provider produced. For gpt-image-1 this is one of its fixed buckets
+	// and may differ from the caller's requested Width/Height.
+	GeneratedWidth  int
+	GeneratedHeight int
 }
 
 // Provider is the interface every image-generation backend must satisfy.
