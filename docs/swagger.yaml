@@ -41,7 +41,7 @@ definitions:
       output:
         allOf:
         - $ref: '#/definitions/models.BannerOutputParams'
-        description: Output defines the desired image dimensions and size constraints.
+        description: Output defines the desired image preset and size constraints.
     type: object
   models.BannerGenerationResult:
     properties:
@@ -93,17 +93,19 @@ definitions:
     type: object
   models.BannerOutputParams:
     properties:
-      height:
-        description: Height is the output image height in pixels. Required.
-        example: 1024
-        type: integer
+      image_preset:
+        description: |-
+          ImagePreset is the desired image orientation. One of "portrait",
+          "landscape" or "square". Defaults to "square" when omitted.
+        enum:
+        - portrait
+        - landscape
+        - square
+        example: square
+        type: string
       max_size_kb:
         description: MaxSizeKB is the maximum acceptable file size in kilobytes. Optional.
         example: 2048
-        type: integer
-      width:
-        description: Width is the output image width in pixels. Required.
-        example: 1024
         type: integer
     type: object
   models.BannerVariant:
@@ -567,31 +569,39 @@ paths:
 
         ## Required fields
         - `inputs.visual_style` — visual preset (e.g. "dark_luxury", "neon_sport")
-        - `output.width`  — canvas width in pixels
-        - `output.height` — canvas height in pixels
         - At least one of: `inputs.headline`, `inputs.cta_text`, `inputs.creative_description`
+
+        ## Image preset
+        `output.image_preset` selects the image orientation. Supported values:
+        - `square` (default when omitted)
+        - `portrait`
+        - `landscape`
+
+        The service maps the preset onto a canvas supported by the configured
+        AI provider and model. Clients must not send `output.width` or
+        `output.height` — such requests are rejected with a validation error.
 
         ## Optional fields
         - `inputs.secondary_text` — supporting copy (always optional)
         - `inputs.headline`        — main promotional text
         - `inputs.cta_text`        — call-to-action button label
         - `inputs.creative_description` — additional artistic direction
+        - `output.image_preset`    — orientation, defaults to "square"
         - `output.max_size_kb`     — maximum file size hint
         - `language`               — prompt locale, defaults to "en"
 
         ## Minimum valid requests (examples)
         ```json
         { "inputs": { "visual_style": "dark_luxury", "headline": "Claim Your Bonus" },
-        "output": { "width": 1024, "height": 1024 } }
+        "output": { "image_preset": "landscape" } }
         ```
         ```json
-        { "inputs": { "visual_style": "neon_sport", "cta_text": "Play Now" },
-        "output": { "width": 1200, "height": 628 } }
+        { "inputs": { "visual_style": "neon_sport", "cta_text": "Play Now" } }
         ```
         ```json
         { "inputs": { "visual_style": "gold_premium",
         "creative_description": "Abstract geometric shapes, dark background" },
-        "output": { "width": 1024, "height": 1024 } }
+        "output": { "image_preset": "portrait" } }
         ```
 
         ## Image data

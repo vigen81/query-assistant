@@ -32,29 +32,40 @@ type BannerInputs struct {
 }
 
 // BannerOutputParams defines the desired output characteristics.
-// Width and Height are required.
+//
+// AI banner generation is driven by a predefined image preset rather than
+// explicit pixel dimensions. The provider decides which canvas each preset
+// maps to, so clients never depend on provider-specific image sizes.
 type BannerOutputParams struct {
-	// Width is the output image width in pixels. Required.
-	Width int `json:"width" example:"1024"`
-	// Height is the output image height in pixels. Required.
-	Height int `json:"height" example:"1024"`
+	// ImagePreset is the desired image orientation. One of "portrait",
+	// "landscape" or "square". Defaults to "square" when omitted.
+	ImagePreset string `json:"image_preset,omitempty" example:"square" enums:"portrait,landscape,square"`
 	// MaxSizeKB is the maximum acceptable file size in kilobytes. Optional.
 	MaxSizeKB int `json:"max_size_kb,omitempty" example:"2048"`
+
+	// Width and Height are legacy fields retained only so that requests still
+	// sending them can be rejected with a clear validation error. They are not
+	// supported for AI banner generation — use ImagePreset instead.
+	//
+	// Deprecated: use ImagePreset.
+	Width *int `json:"width,omitempty" swaggerignore:"true"`
+	// Deprecated: use ImagePreset.
+	Height *int `json:"height,omitempty" swaggerignore:"true"`
 }
 
 // BannerGenerationRequest is the payload sent to POST /banner/generate.
 //
 // Minimum valid request:
 //   - inputs.visual_style  (required)
-//   - output.width         (required)
-//   - output.height        (required)
 //   - At least one of: inputs.headline, inputs.cta_text, inputs.creative_description
+//
+// output.image_preset is optional and defaults to "square".
 type BannerGenerationRequest struct {
 	// Language controls the prompt template locale. Defaults to "en" when omitted.
 	Language string `json:"language,omitempty" example:"en"`
 	// Inputs holds the creative content fields.
 	Inputs BannerInputs `json:"inputs"`
-	// Output defines the desired image dimensions and size constraints.
+	// Output defines the desired image preset and size constraints.
 	Output BannerOutputParams `json:"output"`
 }
 

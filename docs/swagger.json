@@ -15,7 +15,7 @@
     "paths": {
         "/banner/generate": {
             "post": {
-                "description": "Starts an async AI banner generation job and returns a generation ID immediately (HTTP 202).\nPoll GET /banner/generate/{id} until status is \"completed\" or \"failed\".\n\n## Required fields\n- `inputs.visual_style` — visual preset (e.g. \"dark_luxury\", \"neon_sport\")\n- `output.width`  — canvas width in pixels\n- `output.height` — canvas height in pixels\n- At least one of: `inputs.headline`, `inputs.cta_text`, `inputs.creative_description`\n\n## Optional fields\n- `inputs.secondary_text` — supporting copy (always optional)\n- `inputs.headline`        — main promotional text\n- `inputs.cta_text`        — call-to-action button label\n- `inputs.creative_description` — additional artistic direction\n- `output.max_size_kb`     — maximum file size hint\n- `language`               — prompt locale, defaults to \"en\"\n\n## Minimum valid requests (examples)\n```json\n{ \"inputs\": { \"visual_style\": \"dark_luxury\", \"headline\": \"Claim Your Bonus\" },\n\"output\": { \"width\": 1024, \"height\": 1024 } }\n```\n```json\n{ \"inputs\": { \"visual_style\": \"neon_sport\", \"cta_text\": \"Play Now\" },\n\"output\": { \"width\": 1200, \"height\": 628 } }\n```\n```json\n{ \"inputs\": { \"visual_style\": \"gold_premium\",\n\"creative_description\": \"Abstract geometric shapes, dark background\" },\n\"output\": { \"width\": 1024, \"height\": 1024 } }\n```\n\n## Image data\ngpt-image-1 returns `b64_json` by default. The `url` field may be empty.\nUse GET /banner/generate/{id}/variant/{index}/image to render the PNG directly.",
+                "description": "Starts an async AI banner generation job and returns a generation ID immediately (HTTP 202).\nPoll GET /banner/generate/{id} until status is \"completed\" or \"failed\".\n\n## Required fields\n- `inputs.visual_style` — visual preset (e.g. \"dark_luxury\", \"neon_sport\")\n- At least one of: `inputs.headline`, `inputs.cta_text`, `inputs.creative_description`\n\n## Image preset\n`output.image_preset` selects the image orientation. Supported values:\n- `square` (default when omitted)\n- `portrait`\n- `landscape`\n\nThe service maps the preset onto a canvas supported by the configured\nAI provider and model. Clients must not send `output.width` or\n`output.height` — such requests are rejected with a validation error.\n\n## Optional fields\n- `inputs.secondary_text` — supporting copy (always optional)\n- `inputs.headline`        — main promotional text\n- `inputs.cta_text`        — call-to-action button label\n- `inputs.creative_description` — additional artistic direction\n- `output.image_preset`    — orientation, defaults to \"square\"\n- `output.max_size_kb`     — maximum file size hint\n- `language`               — prompt locale, defaults to \"en\"\n\n## Minimum valid requests (examples)\n```json\n{ \"inputs\": { \"visual_style\": \"dark_luxury\", \"headline\": \"Claim Your Bonus\" },\n\"output\": { \"image_preset\": \"landscape\" } }\n```\n```json\n{ \"inputs\": { \"visual_style\": \"neon_sport\", \"cta_text\": \"Play Now\" } }\n```\n```json\n{ \"inputs\": { \"visual_style\": \"gold_premium\",\n\"creative_description\": \"Abstract geometric shapes, dark background\" },\n\"output\": { \"image_preset\": \"portrait\" } }\n```\n\n## Image data\ngpt-image-1 returns `b64_json` by default. The `url` field may be empty.\nUse GET /banner/generate/{id}/variant/{index}/image to render the PNG directly.",
                 "consumes": [
                     "application/json"
                 ],
@@ -604,7 +604,7 @@
                     "example": "en"
                 },
                 "output": {
-                    "description": "Output defines the desired image dimensions and size constraints.",
+                    "description": "Output defines the desired image preset and size constraints.",
                     "allOf": [
                         {
                             "$ref": "#/definitions/models.BannerOutputParams"
@@ -677,20 +677,20 @@
         "models.BannerOutputParams": {
             "type": "object",
             "properties": {
-                "height": {
-                    "description": "Height is the output image height in pixels. Required.",
-                    "type": "integer",
-                    "example": 1024
+                "image_preset": {
+                    "description": "ImagePreset is the desired image orientation. One of \"portrait\",\n\"landscape\" or \"square\". Defaults to \"square\" when omitted.",
+                    "type": "string",
+                    "enum": [
+                        "portrait",
+                        "landscape",
+                        "square"
+                    ],
+                    "example": "square"
                 },
                 "max_size_kb": {
                     "description": "MaxSizeKB is the maximum acceptable file size in kilobytes. Optional.",
                     "type": "integer",
                     "example": 2048
-                },
-                "width": {
-                    "description": "Width is the output image width in pixels. Required.",
-                    "type": "integer",
-                    "example": 1024
                 }
             }
         },

@@ -63,9 +63,23 @@ func (s *BannerService) Generate(ctx context.Context, req *models.BannerGenerati
 		req.Language = "en"
 	}
 
+	// Resolve the client-facing preset into a provider-supported canvas.
+	// The mapping is owned by the provider, so this is the only place the
+	// service needs to know about concrete pixel sizes at all.
+	preset, err := imagegen.ParsePreset(req.Output.ImagePreset)
+	if err != nil {
+		return nil, err
+	}
+	req.Output.ImagePreset = string(preset)
+
+	size, err := s.provider.ResolveSize(preset)
+	if err != nil {
+		return nil, err
+	}
+
 	params := imagegen.PromptParams{
-		Width:               req.Output.Width,
-		Height:              req.Output.Height,
+		Width:               size.Width,
+		Height:              size.Height,
 		Headline:            req.Inputs.Headline,
 		SecondaryText:       req.Inputs.SecondaryText,
 		CTAText:             req.Inputs.CTAText,
@@ -91,14 +105,15 @@ func (s *BannerService) Generate(ctx context.Context, req *models.BannerGenerati
 
 	genReq := imagegen.GenerationRequest{
 		Prompt: prompt,
-		Width:  req.Output.Width,
-		Height: req.Output.Height,
+		Preset: preset,
 	}
 
 	s.logger.WithFields(logrus.Fields{
 		"generation_id":      generationID,
 		"language":           req.Language,
 		"provider":           s.provider.Name(),
+		"image_preset":       string(preset),
+		"resolved_size":      size.String(),
 		"variants":           s.variantCount,
 		"has_headline":       req.Inputs.Headline != "",
 		"has_secondary_text": req.Inputs.SecondaryText != "",
@@ -217,16 +232,19 @@ func (s *BannerService) generateVariants(ctx context.Context, generationID strin
 //
 // Required fields:
 //   - inputs.visual_style
-//   - output.width  (must be positive)
-//   - output.height (must be positive)
 //
 // Minimum content requirement — at least one of:
 //   - inputs.headline
 //   - inputs.cta_text
 //   - inputs.creative_description
 //
+// Rejected fields:
+//   - output.width  — not supported for AI banner generation
+//   - output.height — not supported for AI banner generation
+//
 // Fully optional fields:
 //   - inputs.secondary_text
+//   - output.image_preset (defaults to "square")
 //   - output.max_size_kb
 //   - language
 func validateBannerRequest(req *models.BannerGenerationRequest) error {
@@ -238,11 +256,20 @@ func validateBannerRequest(req *models.BannerGenerationRequest) error {
 	if req.Inputs.VisualStyle == "" {
 		return fmt.Errorf("inputs.visual_style is required")
 	}
-	if req.Output.Width <= 0 {
-		return fmt.Errorf("output.width must be a positive integer")
+
+	// Legacy dimensions are no longer part of the AI banner-generation
+	// contract; reject them explicitly rather than silently ignoring them,
+	// so callers migrate instead of assuming their size was honoured.
+	if req.Output.Width != nil || req.Output.Height != nil {
+		return fmt.Errorf(
+			"output.width and output.height are not supported for AI banner generation: use output.image_preset (%s)",
+			strings.Join(imagegen.SupportedPresets(), ", "),
+		)
 	}
-	if req.Output.Height <= 0 {
-		return fmt.Errorf("output.height must be a positive integer")
+
+	// Preset must be empty (defaulted later) or one of the supported values.
+	if _, err := imagegen.ParsePreset(req.Output.ImagePreset); err != nil {
+		return err
 	}
 
 	// Minimum content requirement: at least one content-driving field.

@@ -35,31 +35,39 @@ func NewBannerHandler(bannerService *services.BannerService, logger *logrus.Logg
 // @Description
 // @Description  ## Required fields
 // @Description  - `inputs.visual_style` — visual preset (e.g. "dark_luxury", "neon_sport")
-// @Description  - `output.width`  — canvas width in pixels
-// @Description  - `output.height` — canvas height in pixels
 // @Description  - At least one of: `inputs.headline`, `inputs.cta_text`, `inputs.creative_description`
+// @Description
+// @Description  ## Image preset
+// @Description  `output.image_preset` selects the image orientation. Supported values:
+// @Description  - `square` (default when omitted)
+// @Description  - `portrait`
+// @Description  - `landscape`
+// @Description
+// @Description  The service maps the preset onto a canvas supported by the configured
+// @Description  AI provider and model. Clients must not send `output.width` or
+// @Description  `output.height` — such requests are rejected with a validation error.
 // @Description
 // @Description  ## Optional fields
 // @Description  - `inputs.secondary_text` — supporting copy (always optional)
 // @Description  - `inputs.headline`        — main promotional text
 // @Description  - `inputs.cta_text`        — call-to-action button label
 // @Description  - `inputs.creative_description` — additional artistic direction
+// @Description  - `output.image_preset`    — orientation, defaults to "square"
 // @Description  - `output.max_size_kb`     — maximum file size hint
 // @Description  - `language`               — prompt locale, defaults to "en"
 // @Description
 // @Description  ## Minimum valid requests (examples)
 // @Description  ```json
 // @Description  { "inputs": { "visual_style": "dark_luxury", "headline": "Claim Your Bonus" },
-// @Description    "output": { "width": 1024, "height": 1024 } }
+// @Description    "output": { "image_preset": "landscape" } }
 // @Description  ```
 // @Description  ```json
-// @Description  { "inputs": { "visual_style": "neon_sport", "cta_text": "Play Now" },
-// @Description    "output": { "width": 1200, "height": 628 } }
+// @Description  { "inputs": { "visual_style": "neon_sport", "cta_text": "Play Now" } }
 // @Description  ```
 // @Description  ```json
 // @Description  { "inputs": { "visual_style": "gold_premium",
 // @Description                "creative_description": "Abstract geometric shapes, dark background" },
-// @Description    "output": { "width": 1024, "height": 1024 } }
+// @Description    "output": { "image_preset": "portrait" } }
 // @Description  ```
 // @Description
 // @Description  ## Image data

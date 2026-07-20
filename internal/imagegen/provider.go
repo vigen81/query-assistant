@@ -3,10 +3,12 @@ package imagegen
 import "context"
 
 // GenerationRequest is the provider-agnostic image generation request.
+//
+// Callers supply a Preset rather than pixel dimensions; each provider maps
+// the preset onto a canvas it actually supports (see Provider.ResolveSize).
 type GenerationRequest struct {
 	Prompt string
-	Width  int
-	Height int
+	Preset Preset
 	// ResponseFormat is "url" or "b64_json". Defaults to "url".
 	ResponseFormat string
 }
@@ -17,8 +19,8 @@ type GeneratedImage struct {
 	B64JSON       string
 	RevisedPrompt string
 	// GeneratedWidth/GeneratedHeight are the actual pixel dimensions the
-	// provider produced. For gpt-image-1 this is one of its fixed buckets
-	// and may differ from the caller's requested Width/Height.
+	// provider produced for the requested preset. These may differ between
+	// providers and models for the same preset.
 	GeneratedWidth  int
 	GeneratedHeight int
 }
@@ -30,6 +32,11 @@ type GeneratedImage struct {
 type Provider interface {
 	// Name returns a human-readable identifier for the provider.
 	Name() string
+	// ResolveSize maps a preset onto the canvas this provider will use.
+	// The mapping is owned entirely by the provider, so swapping providers
+	// or models never changes the client-facing contract. It returns an
+	// error if the provider cannot serve the preset at all.
+	ResolveSize(preset Preset) (Size, error)
 	// Generate sends a single image generation request and returns the result.
 	Generate(ctx context.Context, req GenerationRequest) (*GeneratedImage, error)
 }
